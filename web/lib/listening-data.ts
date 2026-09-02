@@ -4,15 +4,7 @@ import { avatarUrlOf, followersOf, resolveAuthor, stripHtml } from './author-dis
 import { labelTema } from './rules-listening';
 import { buildTrollContext, trollSignal } from './troll-heuristics';
 import { getClassification } from './mention-utils';
-import {
-  assignCaso,
-  CASO_IDS,
-  isRetweet,
-  isRulesModel,
-  isYoutubeExact,
-  reprintKey,
-  type CasoId,
-} from './inbox';
+import { assignCaso, CASO_IDS, CASO_META, isRetweet, isRulesModel, isYoutubeExact, reprintKey, type CasoId } from './inbox';
 import { createAnonClient } from './supabase/anon';
 import type { ListeningQueryOpts, ListeningSort } from './listening-query';
 import type { ListeningMention } from './types';
@@ -426,7 +418,7 @@ export async function getGuschmerListening(opts: ListeningQueryOpts): Promise<Li
   const topTheme = topTema
     ? { label: labelTema(topTema[0]), count: topTema[1] }
     : topCaso && casoCounts[topCaso] > 0
-      ? { label: topCaso === 'deporte' ? 'Deporte / BSC' : topCaso, count: casoCounts[topCaso] }
+      ? { label: CASO_META[topCaso].label, count: casoCounts[topCaso] }
       : null;
 
   const modelLabel =

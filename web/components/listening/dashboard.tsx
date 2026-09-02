@@ -326,6 +326,34 @@ export function ListeningDashboard({
 
             <div>
               <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+                Orden
+              </p>
+              <div className="flex min-w-0 flex-wrap gap-2">
+                {sorts.map((s) => (
+                  <Chip key={s.id} href={href({ orden: s.id })} active={view.sort === s.id}>
+                    {s.label}
+                  </Chip>
+                ))}
+              </div>
+            </div>
+
+            <details
+              className="rounded-xl border border-zinc-200 bg-zinc-50/70 px-3 py-2"
+              open={
+                Boolean(
+                  view.keywordFilter ||
+                    view.authorFilter ||
+                    view.minUrgencia >= 2 ||
+                    view.window === 'rango'
+                ) || undefined
+              }
+            >
+              <summary className="min-h-11 cursor-pointer list-none text-sm font-medium text-zinc-800 [&::-webkit-details-marker]:hidden">
+                Más filtros · alias, autor, urgencia, fechas
+              </summary>
+              <div className="mt-3 flex min-w-0 flex-col gap-3 pb-1">
+            <div>
+              <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-400">
                 Alias
               </p>
               <div className="flex min-w-0 flex-wrap gap-2">
@@ -430,19 +458,8 @@ export function ListeningDashboard({
                 )}
               </form>
             </div>
-
-            <div>
-              <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-400">
-                Orden
-              </p>
-              <div className="flex min-w-0 flex-wrap gap-2">
-                {sorts.map((s) => (
-                  <Chip key={s.id} href={href({ orden: s.id })} active={view.sort === s.id}>
-                    {s.label}
-                  </Chip>
-                ))}
               </div>
-            </div>
+            </details>
           </div>
         </section>
 
