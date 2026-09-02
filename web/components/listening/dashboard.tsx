@@ -119,16 +119,16 @@ export function ListeningDashboard({
           </p>
         )}
 
-        <section className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
-          <div className="min-w-0 rounded-2xl border border-zinc-200 bg-white p-3">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+        <section className="grid min-w-0 grid-cols-3 gap-2">
+          <div className="min-w-0 rounded-2xl border border-zinc-200 bg-white p-2.5 sm:p-3">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400 sm:text-[11px]">
               Sentimiento
             </p>
             {sentiment.classified === 0 ? (
-              <p className="mt-2 text-sm text-zinc-500">Sin tono en base de datos</p>
+              <p className="mt-1 text-xs text-zinc-500 sm:text-sm">Sin tono en BD</p>
             ) : (
               <>
-                <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-zinc-100">
+                <div className="mt-1.5 flex h-1.5 overflow-hidden rounded-full bg-zinc-100 sm:h-2">
                   {sentiment.positivo.count > 0 && (
                     <div className="h-full bg-emerald-500" style={{ width: `${sentiment.positivo.pct}%` }} />
                   )}
@@ -139,38 +139,43 @@ export function ListeningDashboard({
                     <div className="h-full bg-rose-500" style={{ width: `${sentiment.negativo.pct}%` }} />
                   )}
                 </div>
-                <p className="mt-2 text-sm tabular-nums text-zinc-800">
-                  <span className="text-emerald-700">{sentiment.positivo.count} pos</span>
-                  {' · '}
-                  <span className="text-rose-700">{sentiment.negativo.count} neg</span>
-                  {' · '}
-                  <span className="text-slate-600">{sentiment.neutro.count} neu</span>
+                <p className="mt-1.5 text-[11px] leading-snug tabular-nums text-zinc-800 sm:text-sm">
+                  <span className="text-emerald-700">{sentiment.positivo.count}</span>
+                  {' / '}
+                  <span className="text-rose-700">{sentiment.negativo.count}</span>
+                  {' / '}
+                  <span className="text-slate-600">{sentiment.neutro.count}</span>
                 </p>
               </>
             )}
-            <p className="mt-1 text-[11px] leading-snug text-zinc-400">{classifiedNote}</p>
+            <p className="mt-1 hidden text-[11px] leading-snug text-zinc-400 sm:block">{classifiedNote}</p>
           </div>
 
-          <div className="min-w-0 rounded-2xl border border-zinc-200 bg-white p-3">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-400">Volumen 24 h</p>
-            <p className="mt-1 text-3xl font-semibold tabular-nums">{volume.h24}</p>
-            <p className="text-[11px] text-zinc-400">
-              {volume.d7} en 7 días · {view.rawCount} filas · {cards.length} en inbox
+          <div className="min-w-0 rounded-2xl border border-zinc-200 bg-white p-2.5 sm:p-3">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400 sm:text-[11px]">
+              24 h
+            </p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums sm:text-3xl">{volume.h24}</p>
+            <p className="text-[10px] leading-snug text-zinc-400 sm:text-[11px]">
+              {volume.d7} / 7d · {cards.length} hilos
             </p>
           </div>
 
-          <div className="min-w-0 rounded-2xl border border-zinc-200 bg-white p-3">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-400">Tema principal</p>
+          <div className="min-w-0 rounded-2xl border border-zinc-200 bg-white p-2.5 sm:p-3">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400 sm:text-[11px]">
+              Tema
+            </p>
             {view.topTheme ? (
               <>
-                <p className="mt-1 text-lg font-semibold leading-snug">{view.topTheme.label}</p>
-                <p className="text-[11px] text-zinc-400">{view.topTheme.count} en clasificaciones</p>
+                <p className="mt-1 text-sm font-semibold leading-snug sm:text-lg">{view.topTheme.label}</p>
+                <p className="text-[10px] text-zinc-400 sm:text-[11px]">{view.topTheme.count} clasif.</p>
               </>
             ) : (
-              <p className="mt-1 text-sm text-zinc-500">Sin tema clasificado</p>
+              <p className="mt-1 text-xs text-zinc-500 sm:text-sm">Sin tema</p>
             )}
           </div>
         </section>
+        <p className="mt-1.5 text-[11px] text-zinc-400 sm:hidden">{classifiedNote}</p>
 
         <section className="mt-4 min-w-0 rounded-2xl border border-zinc-200 bg-white p-3 sm:p-4">
           <div className="flex min-w-0 flex-col gap-3">
