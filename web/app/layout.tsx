@@ -5,14 +5,17 @@ import type { Metadata } from 'next';
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
 export const metadata: Metadata = {
-  title: 'Monitor — Social listening político',
-  description: 'Menciones, narrativas y alertas en un solo inbox',
+  title: {
+    default: 'Escucha — Andrés Guschmer',
+    template: '%s',
+  },
+  description: 'Cómo se habla de Andrés Guschmer en prensa, YouTube y X',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es" className={inter.variable}>
-      <body>{children}</body>
+      <body className={inter.className}>{children}</body>
     </html>
   );
 }

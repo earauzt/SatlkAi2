@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
+import { useState } from 'react';
 import type { Target } from '@/lib/types';
 import { withTargetQuery } from '@/lib/target-params';
 
@@ -25,6 +26,7 @@ export function Sidebar({
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const [open, setOpen] = useState(false);
 
   function navHref(href: string) {
     const extra: Record<string, string | undefined> = {};
@@ -35,8 +37,8 @@ export function Sidebar({
     return withTargetQuery(href, targetId, extra);
   }
 
-  return (
-    <aside className="flex h-screen w-64 shrink-0 flex-col border-r border-zinc-200 bg-white">
+  const renderPanel = () => (
+    <aside className="flex h-full w-72 max-w-[85vw] shrink-0 flex-col border-r border-zinc-200 bg-white lg:h-screen lg:w-64">
       <div className="border-b border-zinc-200 px-5 py-5">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-900 text-xs font-bold text-white">
@@ -110,9 +112,39 @@ export function Sidebar({
       </nav>
 
       <div className="border-t border-zinc-200 p-4 text-xs text-zinc-400">
-        <p>4 objetivos activos</p>
-        <p className="mt-1">Noboa · Guschmer · Olsen · Viteri</p>
+        <p>Inbox interno · no es la vista del candidato</p>
+        <Link href="/" className="mt-2 inline-block text-zinc-700 underline-offset-2 hover:underline">
+          Abrir escucha de Andrés Guschmer
+        </Link>
       </div>
     </aside>
+  );
+
+  return (
+    <>
+      <div className="flex w-full items-center justify-between border-b border-zinc-200 bg-white px-4 py-3 lg:hidden">
+        <span className="text-sm font-semibold">Operador</span>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl ring-1 ring-zinc-200"
+          aria-label="Abrir menú"
+        >
+          ☰
+        </button>
+      </div>
+      {open && (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/40"
+            aria-label="Cerrar menú"
+            onClick={() => setOpen(false)}
+          />
+          <div className="relative z-50 h-full">{renderPanel()}</div>
+        </div>
+      )}
+      <div className="hidden lg:flex lg:h-screen lg:shrink-0">{renderPanel()}</div>
+    </>
   );
 }

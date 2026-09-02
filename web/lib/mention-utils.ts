@@ -22,6 +22,12 @@ export function sentimentLabel(v: number) {
   return { text: 'Neutro', className: 'bg-sky-100 text-sky-800' };
 }
 
+export function sentimentClientLabel(v: number) {
+  if (v < 0) return { text: 'Negativo', className: 'bg-rose-100 text-rose-800' };
+  if (v > 0) return { text: 'Positivo', className: 'bg-emerald-100 text-emerald-800' };
+  return { text: 'Neutro', className: 'bg-slate-100 text-slate-700' };
+}
+
 export const ETIQUETA_LABELS: Record<string, { label: string; className: string }> = {
   ataque_narrativo: { label: 'Ataque', className: 'bg-red-50 text-red-700 ring-red-200' },
   afirmacion_verificable: { label: 'Verificar', className: 'bg-amber-50 text-amber-800 ring-amber-200' },

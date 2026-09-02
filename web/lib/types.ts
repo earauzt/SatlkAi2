@@ -5,12 +5,21 @@ export type Classification = {
   urgencia: number;
   confianza: number;
   temas?: string[];
+  tipo_actor?: string;
 };
 
 export type Target = {
   id: string;
   nombre: string;
   aliases: string[];
+};
+
+export type AuthorMeta = {
+  name?: string;
+  followers?: number | string;
+  feed_name?: string;
+  feed_url?: string;
+  channel_id?: string;
 };
 
 export type Mention = {
@@ -26,6 +35,11 @@ export type Mention = {
   classifications: Classification | Classification[] | null;
 };
 
+export type ListeningMention = Mention & {
+  author_meta?: AuthorMeta | null;
+  simhash?: number | null;
+};
+
 export type DashboardStats = {
   target_id: string | null;
   target_name: string;
@@ -38,3 +52,5 @@ export type DashboardStats = {
   by_source: Record<string, number>;
   by_target: Record<string, number>;
 };
+
+export type ListeningWindow = '24h' | '7d';
