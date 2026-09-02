@@ -3,7 +3,13 @@ export { metadata } from '@/components/listening/page-body';
 
 export const dynamic = 'force-dynamic';
 
-type SearchParams = Promise<{ ventana?: string; fuente?: string; q?: string }>;
+type SearchParams = Promise<{
+  ventana?: string;
+  fuente?: string;
+  caso?: string;
+  sentimiento?: string;
+  q?: string;
+}>;
 
 export default function GuschmerAliasPage({ searchParams }: { searchParams: SearchParams }) {
   return <GuschmerListeningPage searchParams={searchParams} basePath="/guschmer" />;

@@ -6,7 +6,7 @@ const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
 export const metadata: Metadata = {
   title: {
-    default: 'Escucha — Andrés Guschmer',
+    default: 'Inbox — Andrés Guschmer',
     template: '%s',
   },
   description: 'Cómo se habla de Andrés Guschmer en prensa, YouTube y X',

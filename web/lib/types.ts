@@ -6,6 +6,7 @@ export type Classification = {
   confianza: number;
   temas?: string[];
   tipo_actor?: string;
+  model?: string;
 };
 
 export type Target = {

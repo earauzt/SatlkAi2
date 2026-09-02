@@ -1,14 +1,18 @@
 import { createClient } from '@/lib/supabase/server';
 import { GUSCHMER_NAME, GUSCHMER_TARGET_ID } from './constants';
-import { resolveAuthor, stripHtml } from './author-display';
-import {
-  bucketFromSentimiento,
-  keywordThemes,
-  labelTema,
-  rulesV1FromText,
-} from './rules-listening';
+import { followersOf, resolveAuthor, stripHtml } from './author-display';
+import { labelTema } from './rules-listening';
 import { buildTrollContext, trollSignal } from './troll-heuristics';
 import { getClassification } from './mention-utils';
+import {
+  assignCaso,
+  CASO_IDS,
+  isRetweet,
+  isRulesModel,
+  isYoutubeExact,
+  reprintKey,
+  type CasoId,
+} from './inbox';
 import type { ListeningMention, ListeningWindow } from './types';
 
 export type SourceMixItem = {
@@ -21,53 +25,51 @@ export type SentimentSplit = {
   positivo: { count: number; pct: number };
   negativo: { count: number; pct: number };
   neutro: { count: number; pct: number };
-  fromDb: number;
+  classified: number;
+  unclassified: number;
+  skippedYoutube: number;
   fromRules: number;
+  fromModel: number;
+  modelLabel: string | null;
   total: number;
-};
-
-export type ThemeItem = {
-  key: string;
-  label: string;
-  count: number;
-  origin: 'clasificacion' | 'etiqueta' | 'keyword' | 'narrativa';
-};
-
-export type AuthorItem = {
-  key: string;
-  label: string;
-  known: boolean;
-  kind: string;
-  count: number;
-  source: string;
-  followers: number | null;
-  flagged: boolean;
 };
 
 export type ListeningCard = {
   mention: ListeningMention;
   authorLabel: string;
   authorKnown: boolean;
-  sentiment: number;
-  sentimentOrigin: 'clasificacion' | 'reglas';
-  themes: string[];
+  followers: number | null;
+  sentiment: number | null;
+  sentimentOrigin: 'clasificacion' | 'omitido_youtube' | 'sin_clasificar';
+  caso: CasoId;
+  etiquetas: string[];
+  temas: string[];
+  resumen: string | null;
+  urgencia: number;
+  model: string | null;
+  rulesOnly: boolean;
   flagged: boolean;
   trollReasons: string[];
+  isOriginal: boolean;
+  reprintCount: number;
+  combinedReach: number;
 };
 
 export type ListeningView = {
   targetName: typeof GUSCHMER_NAME;
   window: ListeningWindow;
   sourceFilter: string;
+  casoFilter: string;
+  sentimentFilter: string;
   query: string;
   fetchedAt: string;
   volume: { h24: number; d7: number; total: number };
   sources: SourceMixItem[];
   sentiment: SentimentSplit;
-  themes: ThemeItem[];
-  authors: AuthorItem[];
+  topTheme: { label: string; count: number } | null;
+  casoCounts: Record<CasoId, number>;
+  rawCount: number;
   cards: ListeningCard[];
-  semanticCount: number;
   error: string | null;
 };
 
@@ -103,14 +105,42 @@ function asMention(row: Record<string, unknown>): ListeningMention {
   };
 }
 
+function canonicalBetter(a: ListeningMention, b: ListeningMention): boolean {
+  const aOrig = !isRetweet(a.text);
+  const bOrig = !isRetweet(b.text);
+  if (aOrig !== bOrig) return aOrig;
+  const af = followersOf(a.author_meta) ?? 0;
+  const bf = followersOf(b.author_meta) ?? 0;
+  if (af !== bf) return af > bf;
+  if (a.reach_score !== b.reach_score) return a.reach_score > b.reach_score;
+  return new Date(a.published_at).getTime() < new Date(b.published_at).getTime();
+}
+
+function rankScore(card: ListeningCard): number {
+  let score = 0;
+  if (card.isOriginal) score += 1_000_000;
+  if (card.sentiment !== null && card.sentiment < 0) {
+    score += (2 - card.sentiment) * 50_000;
+  }
+  score += card.urgencia * 8_000;
+  score += Math.min(card.followers ?? 0, 400_000);
+  score += card.combinedReach * 40;
+  score += Math.min(card.reprintCount, 50) * 20;
+  return score;
+}
+
 export async function getGuschmerListening(opts: {
   window: ListeningWindow;
   source?: string;
+  caso?: string;
+  sentimiento?: string;
   q?: string;
 }): Promise<ListeningView> {
   const supabase = await createClient();
   const window = opts.window;
   const sourceFilter = opts.source ?? '';
+  const casoFilter = opts.caso ?? '';
+  const sentimentFilter = opts.sentimiento ?? '';
   const query = opts.q?.trim() ?? '';
   const windowStart = window === '24h' ? hoursAgo(24) : hoursAgo(24 * 7);
 
@@ -124,38 +154,33 @@ export async function getGuschmerListening(opts: {
     return q;
   };
 
-  const [totalRes, h24Res, d7Res, sourceRes, semanticRes, mentionRes] =
-    await Promise.all([
-      countQuery(),
-      countQuery(hoursAgo(24)),
-      countQuery(hoursAgo(24 * 7)),
-      supabase
+  const [totalRes, h24Res, d7Res, sourceRes, mentionRes] = await Promise.all([
+    countQuery(),
+    countQuery(hoursAgo(24)),
+    countQuery(hoursAgo(24 * 7)),
+    supabase
+      .schema('monitor')
+      .from('mentions')
+      .select('source')
+      .eq('target_id', GUSCHMER_TARGET_ID)
+      .gt('published_at', windowStart),
+    (async () => {
+      let q = supabase
         .schema('monitor')
         .from('mentions')
-        .select('source')
+        .select(
+          `id, text, url, author_handle, author_meta, source, published_at, reach_score, tipo_fuente, simhash,
+           classifications (sentimiento, etiquetas, resumen, urgencia, confianza, temas, tipo_actor, model)`
+        )
         .eq('target_id', GUSCHMER_TARGET_ID)
-        .gt('published_at', windowStart),
-      supabase.rpc('monitor_list_semantic_narratives', {
-        p_limit: 15,
-        p_target_id: GUSCHMER_TARGET_ID,
-      }),
-      (async () => {
-        let q = supabase
-          .schema('monitor')
-          .from('mentions')
-          .select(
-            `id, text, url, author_handle, author_meta, source, published_at, reach_score, tipo_fuente, simhash,
-             classifications (sentimiento, etiquetas, resumen, urgencia, confianza, temas, tipo_actor)`
-          )
-          .eq('target_id', GUSCHMER_TARGET_ID)
-          .gt('published_at', windowStart)
-          .order('published_at', { ascending: false })
-          .limit(250);
-        if (sourceFilter) q = q.eq('source', sourceFilter);
-        if (query) q = q.ilike('text', `%${query}%`);
-        return q;
-      })(),
-    ]);
+        .gt('published_at', windowStart)
+        .order('published_at', { ascending: false })
+        .limit(400);
+      if (sourceFilter) q = q.eq('source', sourceFilter);
+      if (query) q = q.ilike('text', `%${query}%`);
+      return q;
+    })(),
+  ]);
 
   const error =
     mentionRes.error?.message ||
@@ -184,124 +209,141 @@ export async function getGuschmerListening(opts: {
   const mentions = ((mentionRes.data ?? []) as Record<string, unknown>[]).map(asMention);
   const trollCtx = buildTrollContext(mentions);
 
+  const groups = new Map<string, ListeningMention[]>();
+  for (const mention of mentions) {
+    const key = reprintKey(mention.text, mention.simhash);
+    const list = groups.get(key);
+    if (list) list.push(mention);
+    else groups.set(key, [mention]);
+  }
+
   let pos = 0;
   let neg = 0;
   let neu = 0;
-  let fromDb = 0;
+  let classified = 0;
+  let unclassified = 0;
+  let skippedYoutube = 0;
   let fromRules = 0;
+  let fromModel = 0;
+  const modelNames = new Map<string, number>();
+  const themeMap = new Map<string, number>();
+  const casoCounts = Object.fromEntries(CASO_IDS.map((id) => [id, 0])) as Record<CasoId, number>;
 
-  const themeMap = new Map<string, ThemeItem>();
-  const bumpTheme = (key: string, label: string, origin: ThemeItem['origin']) => {
-    const prev = themeMap.get(key);
-    if (prev) prev.count += 1;
-    else themeMap.set(key, { key, label, count: 1, origin });
-  };
+  const cards: ListeningCard[] = [];
 
-  const semantic = (semanticRes.data ?? []) as { id: string; label: string; mention_count: number }[];
-  for (const item of semantic) {
-    if (item.label) {
-      themeMap.set(`sem:${item.id}`, {
-        key: `sem:${item.id}`,
-        label: item.label,
-        count: Number(item.mention_count ?? 0),
-        origin: 'narrativa',
-      });
-    }
-  }
+  for (const group of groups.values()) {
+    const canonical = group.reduce((best, cur) => (canonicalBetter(cur, best) ? cur : best));
+    const classification = getClassification(canonical.classifications);
+    const youtube = isYoutubeExact(canonical.source);
+    const author = resolveAuthor(canonical);
+    const signal = trollSignal(canonical, trollCtx);
+    const caso = assignCaso(canonical, youtube ? null : classification);
 
-  const authorMap = new Map<string, AuthorItem>();
-  const cards: ListeningCard[] = mentions.map((mention) => {
-    const classification = getClassification(mention.classifications);
-    const rules = rulesV1FromText(mention.text);
-    const sentimentOrigin: 'clasificacion' | 'reglas' = classification ? 'clasificacion' : 'reglas';
-    const sentiment = classification ? classification.sentimiento : rules.sentimiento;
-    if (sentimentOrigin === 'clasificacion') fromDb += 1;
-    else fromRules += 1;
-    const bucket = bucketFromSentimiento(sentiment);
-    if (bucket === 'positivo') pos += 1;
-    else if (bucket === 'negativo') neg += 1;
-    else neu += 1;
-
-    const themes: string[] = [];
-    if (classification?.temas?.length) {
-      for (const tema of classification.temas) {
-        themes.push(labelTema(tema));
-        bumpTheme(`tema:${tema}`, labelTema(tema), 'clasificacion');
+    let sentiment: number | null = null;
+    let sentimentOrigin: ListeningCard['sentimentOrigin'] = 'sin_clasificar';
+    if (youtube) {
+      skippedYoutube += 1;
+      sentimentOrigin = 'omitido_youtube';
+    } else if (classification) {
+      sentiment = classification.sentimiento;
+      sentimentOrigin = 'clasificacion';
+      classified += 1;
+      if (sentiment > 0) pos += 1;
+      else if (sentiment < 0) neg += 1;
+      else neu += 1;
+      const model = classification.model ?? '';
+      if (isRulesModel(model)) fromRules += 1;
+      else fromModel += 1;
+      if (model) modelNames.set(model, (modelNames.get(model) ?? 0) + 1);
+      for (const tema of classification.temas ?? []) {
+        if (tema && tema !== 'otro') {
+          themeMap.set(tema, (themeMap.get(tema) ?? 0) + 1);
+        }
       }
     } else {
-      for (const tema of keywordThemes(mention.text)) {
-        themes.push(tema.label);
-        bumpTheme(`kw:${tema.id}`, tema.label, 'keyword');
-      }
-    }
-    if (classification?.etiquetas?.length) {
-      for (const tag of classification.etiquetas) {
-        bumpTheme(`et:${tag}`, labelTema(tag), 'etiqueta');
-      }
-    } else {
-      for (const tag of rules.etiquetas) {
-        bumpTheme(`et:${tag}`, labelTema(tag), 'etiqueta');
-      }
+      unclassified += 1;
     }
 
-    const author = resolveAuthor(mention);
-    const signal = trollSignal(mention, trollCtx);
-    const authorKey = `${mention.source}:${author.label}`;
-    const prev = authorMap.get(authorKey);
-    if (prev) {
-      prev.count += 1;
-      prev.flagged = prev.flagged || signal.flagged;
-    } else {
-      authorMap.set(authorKey, {
-        key: authorKey,
-        label: author.label,
-        known: author.known,
-        kind: author.kind,
-        count: 1,
-        source: mention.source,
-        followers: author.followers,
-        flagged: signal.flagged,
-      });
-    }
+    casoCounts[caso] += 1;
 
-    return {
-      mention: { ...mention, text: stripHtml(mention.text) },
+    if (sentimentFilter === 'pos' && !(sentiment !== null && sentiment > 0)) continue;
+    if (sentimentFilter === 'neg' && !(sentiment !== null && sentiment < 0)) continue;
+    if (sentimentFilter === 'neu' && !(sentiment !== null && sentiment === 0)) continue;
+    if (casoFilter && caso !== casoFilter) continue;
+
+    const combinedReach = group.reduce((sum, m) => sum + (m.reach_score ?? 0), 0);
+    const maxFollowers = group.reduce((max, m) => {
+      const n = followersOf(m.author_meta) ?? 0;
+      return n > max ? n : max;
+    }, author.followers ?? 0);
+
+    cards.push({
+      mention: { ...canonical, text: stripHtml(canonical.text) },
       authorLabel: author.label,
       authorKnown: author.known,
+      followers: maxFollowers || author.followers,
       sentiment,
       sentimentOrigin,
-      themes,
+      caso,
+      etiquetas: youtube ? [] : classification?.etiquetas ?? [],
+      temas: youtube ? [] : (classification?.temas ?? []).filter((t) => t && t !== 'otro'),
+      resumen: youtube ? null : classification?.resumen ?? null,
+      urgencia: youtube ? 0 : classification?.urgencia ?? 0,
+      model: classification?.model ?? null,
+      rulesOnly: isRulesModel(classification?.model),
       flagged: signal.flagged,
       trollReasons: signal.reasons,
-    };
+      isOriginal: !isRetweet(canonical.text),
+      reprintCount: group.length,
+      combinedReach,
+    });
+  }
+
+  cards.sort((a, b) => {
+    const diff = rankScore(b) - rankScore(a);
+    if (diff !== 0) return diff;
+    return new Date(b.mention.published_at).getTime() - new Date(a.mention.published_at).getTime();
   });
 
-  const n = mentions.length;
-  const sentiment: SentimentSplit = {
-    positivo: { count: pos, pct: pct(pos, n) },
-    negativo: { count: neg, pct: pct(neg, n) },
-    neutro: { count: neu, pct: pct(neu, n) },
-    fromDb,
-    fromRules,
-    total: n,
-  };
+  const topTema = [...themeMap.entries()].sort((a, b) => b[1] - a[1])[0];
+  const topCaso = [...CASO_IDS].sort((a, b) => casoCounts[b] - casoCounts[a])[0];
+  const topTheme = topTema
+    ? { label: labelTema(topTema[0]), count: topTema[1] }
+    : topCaso && casoCounts[topCaso] > 0
+      ? { label: topCaso === 'deporte' ? 'Deporte / BSC' : topCaso, count: casoCounts[topCaso] }
+      : null;
 
-  const themes = [...themeMap.values()].sort((a, b) => b.count - a.count).slice(0, 10);
-  const authors = [...authorMap.values()].sort((a, b) => b.count - a.count).slice(0, 12);
+  const modelLabel =
+    [...modelNames.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+
+  const sentiment: SentimentSplit = {
+    positivo: { count: pos, pct: pct(pos, classified) },
+    negativo: { count: neg, pct: pct(neg, classified) },
+    neutro: { count: neu, pct: pct(neu, classified) },
+    classified,
+    unclassified,
+    skippedYoutube,
+    fromRules,
+    fromModel,
+    modelLabel,
+    total: mentions.length,
+  };
 
   return {
     targetName: GUSCHMER_NAME,
     window,
     sourceFilter,
+    casoFilter,
+    sentimentFilter,
     query,
     fetchedAt: new Date().toISOString(),
     volume,
     sources,
     sentiment,
-    themes,
-    authors,
+    topTheme,
+    casoCounts,
+    rawCount: mentions.length,
     cards,
-    semanticCount: semantic.length,
     error,
   };
 }
