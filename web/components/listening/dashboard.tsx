@@ -1,41 +1,11 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { ListeningMentionCard } from './mention-card';
+import { InboxFeed } from './inbox-feed';
 import { TROLL_DISCLAIMER } from '@/lib/constants';
 import { CASO_IDS, CASO_META, type CasoId } from '@/lib/inbox';
-import type { ListeningView } from '@/lib/listening-data';
+import { buildListeningHref, type ListeningSort } from '@/lib/listening-query';
+import type { ListeningView, TopAuthor } from '@/lib/listening-data';
 import type { ListeningWindow } from '@/lib/types';
-
-type ViewQuery = Pick<
-  ListeningView,
-  'window' | 'sourceFilter' | 'casoFilter' | 'sentimentFilter' | 'query'
->;
-
-function href(
-  basePath: string,
-  view: ViewQuery,
-  patch: {
-    ventana?: ListeningWindow;
-    fuente?: string;
-    caso?: string;
-    sentimiento?: string;
-    q?: string;
-  }
-) {
-  const sp = new URLSearchParams();
-  const window = patch.ventana ?? view.window;
-  const fuente = patch.fuente === undefined ? view.sourceFilter : patch.fuente;
-  const caso = patch.caso === undefined ? view.casoFilter : patch.caso;
-  const sentimiento = patch.sentimiento === undefined ? view.sentimentFilter : patch.sentimiento;
-  const q = patch.q === undefined ? view.query : patch.q;
-  if (window === '24h') sp.set('ventana', '24h');
-  if (fuente) sp.set('fuente', fuente);
-  if (caso) sp.set('caso', caso);
-  if (sentimiento) sp.set('sentimiento', sentimiento);
-  if (q) sp.set('q', q);
-  const qs = sp.toString();
-  return qs ? `${basePath}?${qs}` : basePath;
-}
 
 function Chip({
   href: to,
@@ -60,6 +30,73 @@ function Chip({
   );
 }
 
+function AuthorList({ title, authors, empty }: { title: string; authors: TopAuthor[]; empty: string }) {
+  return (
+    <div className="min-w-0 rounded-2xl border border-zinc-200 bg-white p-2.5 sm:p-3">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400 sm:text-[11px]">
+        {title}
+      </p>
+      {authors.length === 0 ? (
+        <p className="mt-1 text-xs text-zinc-500">{empty}</p>
+      ) : (
+        <ul className="mt-1 space-y-0.5">
+          {authors.map((a) => (
+            <li key={a.handle || a.label} className="truncate text-xs text-zinc-800 sm:text-sm">
+              {a.label}
+              <span className="ml-1 tabular-nums text-zinc-400">{a.count}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function HiddenFields({
+  view,
+  omit,
+}: {
+  view: ListeningView;
+  omit: string[];
+}) {
+  const skip = new Set(omit);
+  return (
+    <>
+      {view.window === '24h' && !skip.has('ventana') && (
+        <input type="hidden" name="ventana" value="24h" />
+      )}
+      {view.window === 'rango' && view.dateFrom && !skip.has('desde') && (
+        <input type="hidden" name="desde" value={view.dateFrom} />
+      )}
+      {view.window === 'rango' && view.dateTo && !skip.has('hasta') && (
+        <input type="hidden" name="hasta" value={view.dateTo} />
+      )}
+      {view.sourceFilter && !skip.has('fuente') && (
+        <input type="hidden" name="fuente" value={view.sourceFilter} />
+      )}
+      {view.casoFilter && !skip.has('caso') && (
+        <input type="hidden" name="caso" value={view.casoFilter} />
+      )}
+      {view.sentimentFilter && !skip.has('sentimiento') && (
+        <input type="hidden" name="sentimiento" value={view.sentimentFilter} />
+      )}
+      {view.query && !skip.has('q') && <input type="hidden" name="q" value={view.query} />}
+      {view.authorFilter && !skip.has('autor') && (
+        <input type="hidden" name="autor" value={view.authorFilter} />
+      )}
+      {view.keywordFilter && !skip.has('kw') && (
+        <input type="hidden" name="kw" value={view.keywordFilter} />
+      )}
+      {view.minUrgencia >= 2 && !skip.has('urgencia') && (
+        <input type="hidden" name="urgencia" value={String(view.minUrgencia)} />
+      )}
+      {view.sort !== 'ranking' && !skip.has('orden') && (
+        <input type="hidden" name="orden" value={view.sort} />
+      )}
+    </>
+  );
+}
+
 export function ListeningDashboard({
   view,
   basePath,
@@ -67,6 +104,10 @@ export function ListeningDashboard({
   view: ListeningView;
   basePath: string;
 }) {
+  const href = (
+    patch: Parameters<typeof buildListeningHref>[2]
+  ) => buildListeningHref(basePath, view, patch);
+
   const { sentiment, volume, cards } = view;
   const updated = new Date(view.fetchedAt).toLocaleString('es-EC', {
     day: '2-digit',
@@ -80,6 +121,13 @@ export function ListeningDashboard({
       : sentiment.fromRules > 0 && sentiment.fromModel === 0
         ? `${sentiment.classified} clasificadas con reglas · no es un modelo`
         : `${sentiment.classified} clasificadas${sentiment.modelLabel ? ` · ${sentiment.modelLabel}` : ''}`;
+
+  const sorts: { id: ListeningSort; label: string }[] = [
+    { id: 'ranking', label: 'Prioridad' },
+    { id: 'tiempo', label: 'Reciente' },
+    { id: 'urgencia', label: 'Urgencia' },
+    { id: 'engagement', label: 'Alcance' },
+  ];
 
   return (
     <div className="min-h-screen min-w-0 overflow-x-hidden bg-[#f4f5f7] text-zinc-900">
@@ -98,13 +146,14 @@ export function ListeningDashboard({
               </h1>
               <p className="text-xs text-zinc-500">
                 Menciones ranqueadas · actualizado {updated}
+                {view.cacheSeconds ? ` · caché ${view.cacheSeconds / 60} min` : ''}
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap justify-end gap-2">
-              <Chip href={href(basePath, view, { ventana: '7d' })} active={view.window === '7d'}>
+              <Chip href={href({ ventana: '7d' })} active={view.window === '7d'}>
                 7 días
               </Chip>
-              <Chip href={href(basePath, view, { ventana: '24h' })} active={view.window === '24h'}>
+              <Chip href={href({ ventana: '24h' })} active={view.window === '24h'}>
                 24 h
               </Chip>
             </div>
@@ -153,11 +202,11 @@ export function ListeningDashboard({
 
           <div className="min-w-0 rounded-2xl border border-zinc-200 bg-white p-2.5 sm:p-3">
             <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400 sm:text-[11px]">
-              24 h
+              Volumen
             </p>
             <p className="mt-1 text-2xl font-semibold tabular-nums sm:text-3xl">{volume.h24}</p>
             <p className="text-[10px] leading-snug text-zinc-400 sm:text-[11px]">
-              {volume.d7} / 7d · {cards.length} hilos
+              24 h · {volume.d7} / 7d · {cards.length} hilos
             </p>
           </div>
 
@@ -177,20 +226,28 @@ export function ListeningDashboard({
         </section>
         <p className="mt-1.5 text-[11px] text-zinc-400 sm:hidden">{classifiedNote}</p>
 
+        <section className="mt-2 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+          <AuthorList
+            title="Autores +"
+            authors={view.topPositiveAuthors}
+            empty="Nadie con tono positivo en esta ventana"
+          />
+          <AuthorList
+            title="Autores −"
+            authors={view.topNegativeAuthors}
+            empty="Nadie con tono negativo en esta ventana"
+          />
+        </section>
+
         <section className="mt-4 min-w-0 rounded-2xl border border-zinc-200 bg-white p-3 sm:p-4">
           <div className="flex min-w-0 flex-col gap-3">
             <form action={basePath} method="get" className="flex min-w-0 flex-row gap-2">
-              {view.window === '24h' && <input type="hidden" name="ventana" value="24h" />}
-              {view.sourceFilter && <input type="hidden" name="fuente" value={view.sourceFilter} />}
-              {view.casoFilter && <input type="hidden" name="caso" value={view.casoFilter} />}
-              {view.sentimentFilter && (
-                <input type="hidden" name="sentimiento" value={view.sentimentFilter} />
-              )}
+              <HiddenFields view={view} omit={['q']} />
               <input
                 type="search"
                 name="q"
                 defaultValue={view.query}
-                placeholder="Buscar…"
+                placeholder="Buscar en el texto…"
                 className="min-h-11 min-w-0 flex-1 rounded-xl border border-zinc-200 px-3 text-sm outline-none ring-zinc-900 focus:ring-2"
               />
               <button type="submit" className="min-h-11 rounded-xl bg-zinc-900 px-4 text-sm font-medium text-white">
@@ -203,7 +260,7 @@ export function ListeningDashboard({
                 Sentimiento
               </p>
               <div className="flex min-w-0 flex-wrap gap-2">
-                <Chip href={href(basePath, view, { sentimiento: '' })} active={!view.sentimentFilter}>
+                <Chip href={href({ sentimiento: '' })} active={!view.sentimentFilter}>
                   Todos
                 </Chip>
                 {(
@@ -215,7 +272,7 @@ export function ListeningDashboard({
                 ).map(([id, label]) => (
                   <Chip
                     key={id}
-                    href={href(basePath, view, { sentimiento: id })}
+                    href={href({ sentimiento: id })}
                     active={view.sentimentFilter === id}
                   >
                     {label}
@@ -229,15 +286,11 @@ export function ListeningDashboard({
                 Caso
               </p>
               <div className="flex min-w-0 flex-wrap gap-2">
-                <Chip href={href(basePath, view, { caso: '' })} active={!view.casoFilter}>
+                <Chip href={href({ caso: '' })} active={!view.casoFilter}>
                   Todos
                 </Chip>
                 {CASO_IDS.map((id: CasoId) => (
-                  <Chip
-                    key={id}
-                    href={href(basePath, view, { caso: id })}
-                    active={view.casoFilter === id}
-                  >
+                  <Chip key={id} href={href({ caso: id })} active={view.casoFilter === id}>
                     {CASO_META[id].label}
                     {view.casoCounts[id] > 0 ? ` ${view.casoCounts[id]}` : ''}
                   </Chip>
@@ -259,9 +312,132 @@ export function ListeningDashboard({
                 ].map((s) => (
                   <Chip
                     key={s.id || 'src'}
-                    href={href(basePath, view, { fuente: s.id })}
+                    href={href({ fuente: s.id })}
                     active={s.id === '' ? !view.sourceFilter : view.sourceFilter === s.id}
                   >
+                    {s.label}
+                    {s.id && view.sources.find((x) => x.key === s.id)?.count
+                      ? ` ${view.sources.find((x) => x.key === s.id)?.count}`
+                      : ''}
+                  </Chip>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+                Alias
+              </p>
+              <div className="flex min-w-0 flex-wrap gap-2">
+                <Chip href={href({ kw: '' })} active={!view.keywordFilter}>
+                  Todos
+                </Chip>
+                {view.keywords.map((kw) => (
+                  <Chip key={kw} href={href({ kw })} active={view.keywordFilter === kw}>
+                    {kw}
+                  </Chip>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+                Autor
+              </p>
+              <form action={basePath} method="get" className="mb-2 flex min-w-0 flex-row gap-2">
+                <HiddenFields view={view} omit={['autor']} />
+                <input
+                  type="search"
+                  name="autor"
+                  defaultValue={view.authorFilter}
+                  placeholder="Handle o medio…"
+                  className="min-h-11 min-w-0 flex-1 rounded-xl border border-zinc-200 px-3 text-sm outline-none ring-zinc-900 focus:ring-2"
+                />
+                <button type="submit" className="min-h-11 rounded-xl bg-zinc-900 px-4 text-sm font-medium text-white">
+                  Filtrar
+                </button>
+              </form>
+              {view.authors.length > 0 && (
+                <div className="flex min-w-0 flex-wrap gap-2">
+                  <Chip href={href({ autor: '' })} active={!view.authorFilter}>
+                    Todos
+                  </Chip>
+                  {view.authors.map((a) => (
+                    <Chip
+                      key={a.handle}
+                      href={href({ autor: a.handle })}
+                      active={view.authorFilter === a.handle}
+                    >
+                      {a.handle}
+                      {a.count > 1 ? ` ${a.count}` : ''}
+                    </Chip>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+                Urgencia
+              </p>
+              <div className="flex min-w-0 flex-wrap gap-2">
+                <Chip href={href({ urgencia: 0 })} active={view.minUrgencia < 2}>
+                  Todas
+                </Chip>
+                <Chip href={href({ urgencia: 2 })} active={view.minUrgencia === 2}>
+                  2 o más
+                </Chip>
+                <Chip href={href({ urgencia: 3 })} active={view.minUrgencia === 3}>
+                  3
+                </Chip>
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+                Fechas
+              </p>
+              <form action={basePath} method="get" className="flex min-w-0 flex-wrap items-end gap-2">
+                <HiddenFields view={view} omit={['desde', 'hasta', 'ventana']} />
+                <label className="min-w-0 text-[11px] text-zinc-500">
+                  Desde
+                  <input
+                    type="date"
+                    name="desde"
+                    defaultValue={view.dateFrom}
+                    className="mt-1 block min-h-11 w-full rounded-xl border border-zinc-200 px-3 text-sm outline-none ring-zinc-900 focus:ring-2"
+                  />
+                </label>
+                <label className="min-w-0 text-[11px] text-zinc-500">
+                  Hasta
+                  <input
+                    type="date"
+                    name="hasta"
+                    defaultValue={view.dateTo}
+                    className="mt-1 block min-h-11 w-full rounded-xl border border-zinc-200 px-3 text-sm outline-none ring-zinc-900 focus:ring-2"
+                  />
+                </label>
+                <button type="submit" className="min-h-11 rounded-xl bg-zinc-900 px-4 text-sm font-medium text-white">
+                  Aplicar
+                </button>
+                {view.window === 'rango' && (
+                  <Link
+                    href={href({ ventana: '7d' as ListeningWindow, desde: '', hasta: '' })}
+                    className="inline-flex min-h-11 items-center text-sm text-zinc-600 underline-offset-2 hover:underline"
+                  >
+                    Quitar rango
+                  </Link>
+                )}
+              </form>
+            </div>
+
+            <div>
+              <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+                Orden
+              </p>
+              <div className="flex min-w-0 flex-wrap gap-2">
+                {sorts.map((s) => (
+                  <Chip key={s.id} href={href({ orden: s.id })} active={view.sort === s.id}>
                     {s.label}
                   </Chip>
                 ))}
@@ -270,25 +446,13 @@ export function ListeningDashboard({
           </div>
         </section>
 
-        <section className="mt-4 space-y-3">
-          <p className="text-xs text-zinc-500">
-            {cards.length} hilos
-            {view.rawCount > cards.length ? ` · ${view.rawCount} menciones brutas` : ''}
-            {' · '}originales y negativo primero
-          </p>
-          {cards.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-zinc-300 bg-white p-10 text-center">
-              <p className="text-sm font-medium">Nada en este filtro</p>
-              <p className="mt-1 text-sm text-zinc-500">Cambia caso, tono o fuente.</p>
-            </div>
-          ) : (
-            cards.map((card) => <ListeningMentionCard key={card.mention.id} card={card} />)
-          )}
-        </section>
+        <InboxFeed cards={cards} />
 
         <p className="mt-8 pb-8 text-[11px] leading-relaxed text-zinc-400">
           {TROLL_DISCLAIMER}. YouTube se muestra como mención exacta, sin tono derivado. Los % de
-          sentimiento usan solo filas reales de classifications (YouTube queda fuera).{' '}
+          sentimiento usan solo filas reales de classifications (YouTube queda fuera). Alcance es el
+          reach_score del colector, no likes sueltos. El estado abierto/visto/seguimiento queda en
+          este navegador.{' '}
           <Link href="/feed" className="underline-offset-2 hover:underline">
             Inbox operador
           </Link>

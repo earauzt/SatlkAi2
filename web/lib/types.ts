@@ -21,6 +21,11 @@ export type AuthorMeta = {
   feed_name?: string;
   feed_url?: string;
   channel_id?: string;
+  thumbnails?: {
+    default?: { url?: string };
+    medium?: { url?: string };
+    high?: { url?: string };
+  };
 };
 
 export type Mention = {
@@ -54,4 +59,4 @@ export type DashboardStats = {
   by_target: Record<string, number>;
 };
 
-export type ListeningWindow = '24h' | '7d';
+export type ListeningWindow = '24h' | '7d' | 'rango';

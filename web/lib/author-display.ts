@@ -22,6 +22,14 @@ export function followersOf(meta: AuthorMeta | null | undefined): number | null 
   return null;
 }
 
+export function avatarUrlOf(meta: AuthorMeta | null | undefined): string | null {
+  const t = meta?.thumbnails;
+  const url = t?.medium?.url || t?.high?.url || t?.default?.url;
+  if (typeof url !== 'string') return null;
+  if (!/^https:\/\//i.test(url)) return null;
+  return url;
+}
+
 function outletFromPressText(text: string): string | null {
   const clean = stripHtml(text);
   const emdash = clean.split('—')[0] ?? clean;

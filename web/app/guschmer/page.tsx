@@ -1,16 +1,13 @@
 import { GuschmerListeningPage } from '@/components/listening/page-body';
 export { metadata } from '@/components/listening/page-body';
+import type { ListeningSearchParams } from '@/lib/listening-query';
 
 export const dynamic = 'force-dynamic';
 
-type SearchParams = Promise<{
-  ventana?: string;
-  fuente?: string;
-  caso?: string;
-  sentimiento?: string;
-  q?: string;
-}>;
-
-export default function GuschmerAliasPage({ searchParams }: { searchParams: SearchParams }) {
+export default function GuschmerAliasPage({
+  searchParams,
+}: {
+  searchParams: Promise<ListeningSearchParams>;
+}) {
   return <GuschmerListeningPage searchParams={searchParams} basePath="/guschmer" />;
 }

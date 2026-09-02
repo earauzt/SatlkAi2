@@ -1,6 +1,6 @@
-import { createClient } from '@/lib/supabase/server';
-import { GUSCHMER_NAME, GUSCHMER_TARGET_ID } from './constants';
-import { followersOf, resolveAuthor, stripHtml } from './author-display';
+import { unstable_cache } from 'next/cache';
+import { GUSCHMER_ALIASES, GUSCHMER_KEYWORD_CHIPS, GUSCHMER_NAME, GUSCHMER_TARGET_ID } from './constants';
+import { avatarUrlOf, followersOf, resolveAuthor, stripHtml } from './author-display';
 import { labelTema } from './rules-listening';
 import { buildTrollContext, trollSignal } from './troll-heuristics';
 import { getClassification } from './mention-utils';
@@ -13,7 +13,9 @@ import {
   reprintKey,
   type CasoId,
 } from './inbox';
-import type { ListeningMention, ListeningWindow } from './types';
+import { createAnonClient } from './supabase/anon';
+import type { ListeningQueryOpts, ListeningSort } from './listening-query';
+import type { ListeningMention } from './types';
 
 export type SourceMixItem = {
   key: string;
@@ -34,10 +36,19 @@ export type SentimentSplit = {
   total: number;
 };
 
+export type TopAuthor = {
+  label: string;
+  handle: string | null;
+  count: number;
+};
+
 export type ListeningCard = {
   mention: ListeningMention;
   authorLabel: string;
+  authorHandle: string | null;
+  authorDisplayName: string | null;
   authorKnown: boolean;
+  avatarUrl: string | null;
   followers: number | null;
   sentiment: number | null;
   sentimentOrigin: 'clasificacion' | 'omitido_youtube' | 'sin_clasificar';
@@ -53,20 +64,21 @@ export type ListeningCard = {
   isOriginal: boolean;
   reprintCount: number;
   combinedReach: number;
+  highlightTerms: string[];
 };
 
-export type ListeningView = {
+export type ListeningView = ListeningQueryOpts & {
   targetName: typeof GUSCHMER_NAME;
-  window: ListeningWindow;
-  sourceFilter: string;
-  casoFilter: string;
-  sentimentFilter: string;
-  query: string;
   fetchedAt: string;
+  cacheSeconds: number;
   volume: { h24: number; d7: number; total: number };
   sources: SourceMixItem[];
   sentiment: SentimentSplit;
   topTheme: { label: string; count: number } | null;
+  topPositiveAuthors: TopAuthor[];
+  topNegativeAuthors: TopAuthor[];
+  authors: { handle: string; label: string; count: number }[];
+  keywords: readonly string[];
   casoCounts: Record<CasoId, number>;
   rawCount: number;
   cards: ListeningCard[];
@@ -79,6 +91,8 @@ const SOURCE_LABELS: Record<string, string> = {
   youtube: 'YouTube',
   x: 'X',
 };
+
+const CACHE_SECONDS = 300;
 
 function hoursAgo(hours: number) {
   return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
@@ -129,20 +143,70 @@ function rankScore(card: ListeningCard): number {
   return score;
 }
 
-export async function getGuschmerListening(opts: {
-  window: ListeningWindow;
-  source?: string;
-  caso?: string;
-  sentimiento?: string;
-  q?: string;
-}): Promise<ListeningView> {
-  const supabase = await createClient();
-  const window = opts.window;
-  const sourceFilter = opts.source ?? '';
-  const casoFilter = opts.caso ?? '';
-  const sentimentFilter = opts.sentimiento ?? '';
-  const query = opts.q?.trim() ?? '';
-  const windowStart = window === '24h' ? hoursAgo(24) : hoursAgo(24 * 7);
+function dayBound(day: string, end: boolean): string {
+  return new Date(`${day}T${end ? '23:59:59.999' : '00:00:00.000'}Z`).toISOString();
+}
+
+function resolveRange(opts: ListeningQueryOpts): { start: string; end: string | null } {
+  if (opts.dateFrom || opts.dateTo) {
+    const start = opts.dateFrom ? dayBound(opts.dateFrom, false) : hoursAgo(24 * 90);
+    const end = opts.dateTo ? dayBound(opts.dateTo, true) : new Date().toISOString();
+    return { start, end };
+  }
+  if (opts.window === '24h') return { start: hoursAgo(24), end: null };
+  return { start: hoursAgo(24 * 7), end: null };
+}
+
+function includesInsensitive(haystack: string, needle: string): boolean {
+  return haystack.toLocaleLowerCase('es').includes(needle.toLocaleLowerCase('es'));
+}
+
+function topAuthorsFrom(
+  rows: { label: string; handle: string | null }[],
+  limit = 3
+): TopAuthor[] {
+  const map = new Map<string, TopAuthor>();
+  for (const row of rows) {
+    const key = (row.handle || row.label).toLocaleLowerCase('es');
+    const prev = map.get(key);
+    if (prev) prev.count += 1;
+    else map.set(key, { label: row.label, handle: row.handle, count: 1 });
+  }
+  return [...map.values()].sort((a, b) => b.count - a.count).slice(0, limit);
+}
+
+function sortCards(cards: ListeningCard[], sort: ListeningSort) {
+  cards.sort((a, b) => {
+    if (sort === 'tiempo') {
+      return new Date(b.mention.published_at).getTime() - new Date(a.mention.published_at).getTime();
+    }
+    if (sort === 'urgencia') {
+      const u = b.urgencia - a.urgencia;
+      if (u !== 0) return u;
+      return new Date(b.mention.published_at).getTime() - new Date(a.mention.published_at).getTime();
+    }
+    if (sort === 'engagement') {
+      const reach = b.combinedReach - a.combinedReach;
+      if (reach !== 0) return reach;
+      return (b.followers ?? 0) - (a.followers ?? 0);
+    }
+    const diff = rankScore(b) - rankScore(a);
+    if (diff !== 0) return diff;
+    return new Date(b.mention.published_at).getTime() - new Date(a.mention.published_at).getTime();
+  });
+}
+
+type WindowPayload = {
+  mentions: ListeningMention[];
+  volume: { h24: number; d7: number; total: number };
+  sources: SourceMixItem[];
+  fetchedAt: string;
+  error: string | null;
+};
+
+async function fetchGuschmerWindow(rangeStart: string, rangeEnd: string): Promise<WindowPayload> {
+  const supabase = createAnonClient();
+  const end = rangeEnd || null;
 
   const countQuery = (since?: string) => {
     let q = supabase
@@ -154,32 +218,34 @@ export async function getGuschmerListening(opts: {
     return q;
   };
 
+  let mentionQuery = supabase
+    .schema('monitor')
+    .from('mentions')
+    .select(
+      `id, text, url, author_handle, author_meta, source, published_at, reach_score, tipo_fuente, simhash,
+       classifications (sentimiento, etiquetas, resumen, urgencia, confianza, temas, tipo_actor, model)`
+    )
+    .eq('target_id', GUSCHMER_TARGET_ID)
+    .gt('published_at', rangeStart)
+    .order('published_at', { ascending: false })
+    .limit(400);
+  if (end) mentionQuery = mentionQuery.lte('published_at', end);
+
   const [totalRes, h24Res, d7Res, sourceRes, mentionRes] = await Promise.all([
     countQuery(),
     countQuery(hoursAgo(24)),
     countQuery(hoursAgo(24 * 7)),
-    supabase
-      .schema('monitor')
-      .from('mentions')
-      .select('source')
-      .eq('target_id', GUSCHMER_TARGET_ID)
-      .gt('published_at', windowStart),
-    (async () => {
+    (() => {
       let q = supabase
         .schema('monitor')
         .from('mentions')
-        .select(
-          `id, text, url, author_handle, author_meta, source, published_at, reach_score, tipo_fuente, simhash,
-           classifications (sentimiento, etiquetas, resumen, urgencia, confianza, temas, tipo_actor, model)`
-        )
+        .select('source')
         .eq('target_id', GUSCHMER_TARGET_ID)
-        .gt('published_at', windowStart)
-        .order('published_at', { ascending: false })
-        .limit(400);
-      if (sourceFilter) q = q.eq('source', sourceFilter);
-      if (query) q = q.ilike('text', `%${query}%`);
+        .gt('published_at', rangeStart);
+      if (end) q = q.lte('published_at', end);
       return q;
     })(),
+    mentionQuery,
   ]);
 
   const error =
@@ -187,13 +253,8 @@ export async function getGuschmerListening(opts: {
     totalRes.error?.message ||
     h24Res.error?.message ||
     d7Res.error?.message ||
+    sourceRes.error?.message ||
     null;
-
-  const volume = {
-    total: totalRes.count ?? 0,
-    h24: h24Res.count ?? 0,
-    d7: d7Res.count ?? 0,
-  };
 
   const sourceRows = (sourceRes.data ?? []) as { source: string }[];
   const sourceCounts: Record<string, number> = { rss: 0, youtube: 0, x: 0, google_news: 0 };
@@ -206,9 +267,33 @@ export async function getGuschmerListening(opts: {
     count: sourceCounts[key] ?? 0,
   }));
 
-  const mentions = ((mentionRes.data ?? []) as Record<string, unknown>[]).map(asMention);
-  const trollCtx = buildTrollContext(mentions);
+  return {
+    mentions: ((mentionRes.data ?? []) as Record<string, unknown>[]).map(asMention),
+    volume: {
+      total: totalRes.count ?? 0,
+      h24: h24Res.count ?? 0,
+      d7: d7Res.count ?? 0,
+    },
+    sources,
+    fetchedAt: new Date().toISOString(),
+    error,
+  };
+}
 
+const fetchGuschmerWindowCached = unstable_cache(
+  async (rangeStart: string, rangeEnd: string) => fetchGuschmerWindow(rangeStart, rangeEnd),
+  ['guschmer-window-v1'],
+  { revalidate: CACHE_SECONDS }
+);
+
+export async function getGuschmerListening(opts: ListeningQueryOpts): Promise<ListeningView> {
+  const { start, end } = resolveRange(opts);
+  const payload = await fetchGuschmerWindowCached(start, end ?? '');
+  const mentions = opts.sourceFilter
+    ? payload.mentions.filter((m) => m.source === opts.sourceFilter)
+    : payload.mentions;
+
+  const trollCtx = buildTrollContext(mentions);
   const groups = new Map<string, ListeningMention[]>();
   for (const mention of mentions) {
     const key = reprintKey(mention.text, mention.simhash);
@@ -228,6 +313,14 @@ export async function getGuschmerListening(opts: {
   const modelNames = new Map<string, number>();
   const themeMap = new Map<string, number>();
   const casoCounts = Object.fromEntries(CASO_IDS.map((id) => [id, 0])) as Record<CasoId, number>;
+  const positiveAuthors: { label: string; handle: string | null }[] = [];
+  const negativeAuthors: { label: string; handle: string | null }[] = [];
+  const authorCounts = new Map<string, { handle: string; label: string; count: number }>();
+
+  const highlightTerms = [
+    ...GUSCHMER_ALIASES,
+    ...(opts.keywordFilter ? [opts.keywordFilter] : []),
+  ];
 
   const cards: ListeningCard[] = [];
 
@@ -248,9 +341,15 @@ export async function getGuschmerListening(opts: {
       sentiment = classification.sentimiento;
       sentimentOrigin = 'clasificacion';
       classified += 1;
-      if (sentiment > 0) pos += 1;
-      else if (sentiment < 0) neg += 1;
-      else neu += 1;
+      if (sentiment > 0) {
+        pos += 1;
+        if (author.known) positiveAuthors.push({ label: author.label, handle: author.handle });
+      } else if (sentiment < 0) {
+        neg += 1;
+        if (author.known) negativeAuthors.push({ label: author.label, handle: author.handle });
+      } else {
+        neu += 1;
+      }
       const model = classification.model ?? '';
       if (isRulesModel(model)) fromRules += 1;
       else fromModel += 1;
@@ -266,10 +365,27 @@ export async function getGuschmerListening(opts: {
 
     casoCounts[caso] += 1;
 
-    if (sentimentFilter === 'pos' && !(sentiment !== null && sentiment > 0)) continue;
-    if (sentimentFilter === 'neg' && !(sentiment !== null && sentiment < 0)) continue;
-    if (sentimentFilter === 'neu' && !(sentiment !== null && sentiment === 0)) continue;
-    if (casoFilter && caso !== casoFilter) continue;
+    if (author.known && author.handle) {
+      const key = author.handle.toLocaleLowerCase('es');
+      const prev = authorCounts.get(key);
+      if (prev) prev.count += 1;
+      else authorCounts.set(key, { handle: author.handle, label: author.label, count: 1 });
+    }
+
+    const text = stripHtml(canonical.text);
+    if (opts.sentimentFilter === 'pos' && !(sentiment !== null && sentiment > 0)) continue;
+    if (opts.sentimentFilter === 'neg' && !(sentiment !== null && sentiment < 0)) continue;
+    if (opts.sentimentFilter === 'neu' && !(sentiment !== null && sentiment === 0)) continue;
+    if (opts.casoFilter && caso !== opts.casoFilter) continue;
+    if (opts.minUrgencia >= 2 && (youtube ? 0 : classification?.urgencia ?? 0) < opts.minUrgencia) {
+      continue;
+    }
+    if (opts.query && !includesInsensitive(text, opts.query)) continue;
+    if (opts.keywordFilter && !includesInsensitive(text, opts.keywordFilter)) continue;
+    if (opts.authorFilter) {
+      const hay = `${author.label} ${author.handle ?? ''} ${author.displayName ?? ''}`;
+      if (!includesInsensitive(hay, opts.authorFilter)) continue;
+    }
 
     const combinedReach = group.reduce((sum, m) => sum + (m.reach_score ?? 0), 0);
     const maxFollowers = group.reduce((max, m) => {
@@ -278,9 +394,12 @@ export async function getGuschmerListening(opts: {
     }, author.followers ?? 0);
 
     cards.push({
-      mention: { ...canonical, text: stripHtml(canonical.text) },
+      mention: { ...canonical, text },
       authorLabel: author.label,
+      authorHandle: author.handle,
+      authorDisplayName: author.displayName,
       authorKnown: author.known,
+      avatarUrl: avatarUrlOf(canonical.author_meta),
       followers: maxFollowers || author.followers,
       sentiment,
       sentimentOrigin,
@@ -296,14 +415,11 @@ export async function getGuschmerListening(opts: {
       isOriginal: !isRetweet(canonical.text),
       reprintCount: group.length,
       combinedReach,
+      highlightTerms,
     });
   }
 
-  cards.sort((a, b) => {
-    const diff = rankScore(b) - rankScore(a);
-    if (diff !== 0) return diff;
-    return new Date(b.mention.published_at).getTime() - new Date(a.mention.published_at).getTime();
-  });
+  sortCards(cards, opts.sort);
 
   const topTema = [...themeMap.entries()].sort((a, b) => b[1] - a[1])[0];
   const topCaso = [...CASO_IDS].sort((a, b) => casoCounts[b] - casoCounts[a])[0];
@@ -330,20 +446,21 @@ export async function getGuschmerListening(opts: {
   };
 
   return {
+    ...opts,
     targetName: GUSCHMER_NAME,
-    window,
-    sourceFilter,
-    casoFilter,
-    sentimentFilter,
-    query,
-    fetchedAt: new Date().toISOString(),
-    volume,
-    sources,
+    fetchedAt: payload.fetchedAt,
+    cacheSeconds: CACHE_SECONDS,
+    volume: payload.volume,
+    sources: payload.sources,
     sentiment,
     topTheme,
+    topPositiveAuthors: topAuthorsFrom(positiveAuthors),
+    topNegativeAuthors: topAuthorsFrom(negativeAuthors),
+    authors: [...authorCounts.values()].sort((a, b) => b.count - a.count).slice(0, 8),
+    keywords: GUSCHMER_KEYWORD_CHIPS,
     casoCounts,
     rawCount: mentions.length,
     cards,
-    error,
+    error: payload.error,
   };
 }

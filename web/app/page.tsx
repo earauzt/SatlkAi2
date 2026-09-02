@@ -1,4 +1,5 @@
 import { GuschmerListeningPage } from '@/components/listening/page-body';
+import type { ListeningSearchParams } from '@/lib/listening-query';
 import type { Metadata } from 'next';
 
 export const dynamic = 'force-dynamic';
@@ -8,14 +9,10 @@ export const metadata: Metadata = {
   description: 'Inbox de menciones de Andrés Guschmer en prensa, YouTube y X',
 };
 
-type SearchParams = Promise<{
-  ventana?: string;
-  fuente?: string;
-  caso?: string;
-  sentimiento?: string;
-  q?: string;
-}>;
-
-export default function HomePage({ searchParams }: { searchParams: SearchParams }) {
+export default function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<ListeningSearchParams>;
+}) {
   return <GuschmerListeningPage searchParams={searchParams} basePath="/" />;
 }
