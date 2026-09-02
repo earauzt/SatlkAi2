@@ -132,8 +132,8 @@ export function ListeningDashboard({
                 sentiment.total === 0
                   ? 'Sin menciones en esta ventana.'
                   : sentiment.fromDb === 0
-                    ? `Sobre ${sentiment.total} menciones de Guschmer en la ventana. Sin filas en classifications: se usó rules-v1 (palabras clave), no un modelo.`
-                    : `Sobre ${sentiment.total} menciones. ${sentiment.fromDb} con classifications.sentimiento; ${sentiment.fromRules} con rules-v1.`
+                    ? `Sobre ${sentiment.total} menciones tuyas en la ventana. Todavía no hay clasificación guardada: el tono se estima con reglas de palabras clave, no con un modelo de IA.`
+                    : `Sobre ${sentiment.total} menciones. ${sentiment.fromDb} con clasificación guardada; ${sentiment.fromRules} estimadas por reglas de palabras clave.`
               }
             >
               {sentiment.total === 0 ? (
@@ -185,7 +185,7 @@ export function ListeningDashboard({
             </Card>
 
             <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-1">
-              <Card title="Volumen" hint="Conteos por published_at, solo Andrés Guschmer.">
+              <Card title="Volumen" hint="Cuántas menciones hay sobre ti en las últimas 24 horas y 7 días.">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-xl bg-zinc-50 px-3 py-3">
                     <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-400">
@@ -205,7 +205,7 @@ export function ListeningDashboard({
 
               <Card
                 title="Fuentes"
-                hint="Mezcla RSS / YouTube / X (y Google News si hay filas). Ventana seleccionada."
+                hint="Mezcla de RSS, YouTube y X (más Google News si hay notas de prensa)."
               >
                 <ul className="space-y-2">
                   {sources.map((s) => {
@@ -234,8 +234,8 @@ export function ListeningDashboard({
                 title="De qué hablan"
                 hint={
                   view.semanticCount > 0
-                    ? 'Incluye narrativas semánticas (pgvector) cuando existen, más temas y palabras clave reales.'
-                    : 'Sin clusters de embeddings. Temas por classifications.temas/etiquetas o palabras clave ya definidas — no son grupos inventados.'
+                    ? 'Incluye narrativas semánticas cuando el sistema de embeddings tiene datos, más temas y palabras clave reales.'
+                    : 'No hay agrupaciones por IA. Temas según etiquetas existentes o palabras clave ya definidas — no se inventan clusters.'
                 }
               >
                 {themes.length === 0 ? (
@@ -258,9 +258,9 @@ export function ListeningDashboard({
                           {theme.origin === 'narrativa'
                             ? 'narrativa semántica'
                             : theme.origin === 'clasificacion'
-                              ? 'classifications.temas'
+                              ? 'tema clasificado'
                               : theme.origin === 'etiqueta'
-                                ? 'etiquetas / rules-v1'
+                                ? 'etiqueta / reglas'
                                 : 'palabras clave'}
                         </p>
                       </li>
@@ -312,7 +312,7 @@ export function ListeningDashboard({
                 {cards.length} en la ventana
                 {view.sourceFilter ? ` · filtro ${view.sourceFilter}` : ''}
               </p>
-              <form action={basePath} method="get" className="mt-3 flex min-w-0 flex-col gap-2 sm:flex-row">
+              <form action={basePath} method="get" className="mt-3 flex min-w-0 flex-row gap-2">
                 {view.window === '24h' && <input type="hidden" name="ventana" value="24h" />}
                 {view.sourceFilter && <input type="hidden" name="fuente" value={view.sourceFilter} />}
                 <input

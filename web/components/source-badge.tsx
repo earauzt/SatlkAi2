@@ -11,7 +11,7 @@ export function SourceBadge({ source }: { source: string }) {
     <span
       className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${meta.className}`}
     >
-      <span className="opacity-80">{meta.icon}</span>
+      {meta.icon && meta.icon !== meta.label && <span className="opacity-80">{meta.icon}</span>}
       {meta.label}
     </span>
   );

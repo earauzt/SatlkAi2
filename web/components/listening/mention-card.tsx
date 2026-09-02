@@ -55,8 +55,8 @@ export function ListeningMentionCard({ card }: { card: ListeningCard }) {
         <div className="flex flex-wrap items-center gap-3 text-[11px] text-zinc-400">
           <span>
             {card.sentimentOrigin === 'clasificacion'
-              ? 'sentimiento en classifications'
-              : 'sentimiento por reglas (sin fila de clasificación)'}
+              ? 'tono clasificado'
+              : 'tono estimado por palabras clave'}
           </span>
           {card.mention.url && (
             <a
