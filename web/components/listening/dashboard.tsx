@@ -530,13 +530,7 @@ export function ListeningDashboard({
               </div>
             </section>
 
-            <InboxFeed
-              cards={view.cards}
-              temaHref={(tema) => href({ tema: view.themeFilter === tema ? '' : tema })}
-              autorHref={(handle) => href({ autor: view.authorFilter === handle ? '' : handle })}
-              casoHref={(caso) => href({ caso: view.casoFilter === caso ? '' : caso })}
-              sentHref={(sent) => href({ sentimiento: view.sentimentFilter === sent ? '' : sent })}
-            />
+            <InboxFeed cards={view.cards} basePath={basePath} hrefState={view} />
           </div>
 
           <div className="hidden min-w-0 xl:block print:block">
