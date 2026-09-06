@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { InboxFeed } from './inbox-feed';
 import { TROLL_DISCLAIMER } from '@/lib/constants';
+import { formatCompact, formatPct } from '@/lib/listening-report';
 import { CASO_IDS, CASO_META, type CasoId } from '@/lib/inbox';
 import { buildListeningHref, type ListeningSort } from '@/lib/listening-query';
 import type { ListeningView, TopAuthor } from '@/lib/listening-data';
@@ -150,6 +151,9 @@ export function ListeningDashboard({
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap justify-end gap-2">
+              <Chip href={basePath === '/guschmer' ? '/guschmer/informe' : '/informe'} active={false}>
+                Informe
+              </Chip>
               <Chip href={href({ ventana: '7d' })} active={view.window === '7d'}>
                 7 días
               </Chip>
@@ -167,6 +171,32 @@ export function ListeningDashboard({
             {view.error}
           </p>
         )}
+
+        <section className="mb-2 grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="min-w-0 rounded-2xl border border-zinc-200 bg-white p-2.5 sm:p-3">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">Resultados</p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">{formatCompact(view.dedupedCount)}</p>
+            <p className="text-[10px] leading-snug text-zinc-400">
+              hilos · reprintKey
+              {view.rawCount !== view.dedupedCount ? ` · ${view.rawCount} brutos` : ''}
+            </p>
+          </div>
+          <div className="min-w-0 rounded-2xl border border-zinc-200 bg-white p-2.5 sm:p-3">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">Engagement</p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">{formatCompact(view.engagementSum)}</p>
+            <p className="text-[10px] leading-snug text-zinc-400">suma reach_score</p>
+          </div>
+          <div className="min-w-0 rounded-2xl border border-zinc-200 bg-white p-2.5 sm:p-3">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">Autores únicos</p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">{formatCompact(view.uniqueAuthors)}</p>
+            <p className="text-[10px] leading-snug text-zinc-400">author_handle resuelto</p>
+          </div>
+          <div className="min-w-0 rounded-2xl border border-zinc-200 bg-white p-2.5 sm:p-3">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">X en el mix</p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">{formatPct(view.xMixPct)}</p>
+            <p className="text-[10px] leading-snug text-zinc-400">mentions.source</p>
+          </div>
+        </section>
 
         <section className="grid min-w-0 grid-cols-3 gap-2">
           <div className="min-w-0 rounded-2xl border border-zinc-200 bg-white p-2.5 sm:p-3">
@@ -470,6 +500,13 @@ export function ListeningDashboard({
           sentimiento usan solo filas reales de classifications (YouTube queda fuera). Alcance es el
           reach_score del colector, no likes sueltos. El estado abierto/visto/seguimiento queda en
           este navegador.{' '}
+          <Link
+            href={basePath === '/guschmer' ? '/guschmer/informe' : '/informe'}
+            className="underline-offset-2 hover:underline"
+          >
+            Informe
+          </Link>
+          {' · '}
           <Link href="/feed" className="underline-offset-2 hover:underline">
             Inbox operador
           </Link>

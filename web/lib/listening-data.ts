@@ -4,7 +4,8 @@ import { avatarUrlOf, followersOf, resolveAuthor, stripHtml } from './author-dis
 import { labelTema } from './rules-listening';
 import { buildTrollContext, trollSignal } from './troll-heuristics';
 import { getClassification } from './mention-utils';
-import { assignCaso, CASO_IDS, CASO_META, isRetweet, isRulesModel, isYoutubeExact, reprintKey, type CasoId } from './inbox';
+import { assignCaso, CASO_IDS, CASO_META, isRetweet, isRulesModel, isYoutubeExact, type CasoId } from './inbox';
+import { canonicalBetter, groupByReprint } from './mention-dedupe';
 import { createAnonClient } from './supabase/anon';
 import type { ListeningQueryOpts, ListeningSort } from './listening-query';
 import type { ListeningMention } from './types';
@@ -73,6 +74,10 @@ export type ListeningView = ListeningQueryOpts & {
   keywords: readonly string[];
   casoCounts: Record<CasoId, number>;
   rawCount: number;
+  dedupedCount: number;
+  engagementSum: number;
+  uniqueAuthors: number;
+  xMixPct: number;
   cards: ListeningCard[];
   error: string | null;
 };
@@ -109,17 +114,6 @@ function asMention(row: Record<string, unknown>): ListeningMention {
     simhash: (row.simhash as number | null) ?? null,
     classifications: (row.classifications as ListeningMention['classifications']) ?? null,
   };
-}
-
-function canonicalBetter(a: ListeningMention, b: ListeningMention): boolean {
-  const aOrig = !isRetweet(a.text);
-  const bOrig = !isRetweet(b.text);
-  if (aOrig !== bOrig) return aOrig;
-  const af = followersOf(a.author_meta) ?? 0;
-  const bf = followersOf(b.author_meta) ?? 0;
-  if (af !== bf) return af > bf;
-  if (a.reach_score !== b.reach_score) return a.reach_score > b.reach_score;
-  return new Date(a.published_at).getTime() < new Date(b.published_at).getTime();
 }
 
 function rankScore(card: ListeningCard): number {
@@ -286,13 +280,7 @@ export async function getGuschmerListening(opts: ListeningQueryOpts): Promise<Li
     : payload.mentions;
 
   const trollCtx = buildTrollContext(mentions);
-  const groups = new Map<string, ListeningMention[]>();
-  for (const mention of mentions) {
-    const key = reprintKey(mention.text, mention.simhash);
-    const list = groups.get(key);
-    if (list) list.push(mention);
-    else groups.set(key, [mention]);
-  }
+  const groups = groupByReprint(mentions);
 
   let pos = 0;
   let neg = 0;
@@ -452,6 +440,13 @@ export async function getGuschmerListening(opts: ListeningQueryOpts): Promise<Li
     keywords: GUSCHMER_KEYWORD_CHIPS,
     casoCounts,
     rawCount: mentions.length,
+    dedupedCount: groups.size,
+    engagementSum: mentions.reduce((sum, m) => sum + (m.reach_score ?? 0), 0),
+    uniqueAuthors: authorCounts.size,
+    xMixPct: pct(
+      payload.sources.find((s) => s.key === 'x')?.count ?? 0,
+      payload.sources.reduce((sum, s) => sum + s.count, 0)
+    ),
     cards,
     error: payload.error,
   };
