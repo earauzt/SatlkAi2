@@ -8,6 +8,7 @@ export type InformeSearchParams = Promise<{
   range?: string;
   desde?: string;
   hasta?: string;
+  imprimir?: string;
 }>;
 
 export async function GuschmerInformePage({

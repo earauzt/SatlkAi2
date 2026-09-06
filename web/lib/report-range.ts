@@ -127,3 +127,45 @@ export function withReportQuery(
   const qs = sp.toString();
   return qs ? `${path}?${qs}` : path;
 }
+
+/** Convierte la ventana del inbox al recorte que usa el informe (Guayaquil). */
+export function listeningToReportRange(opts: {
+  window: string;
+  dateFrom: string;
+  dateTo: string;
+}): ReportRange {
+  if (opts.dateFrom || opts.dateTo) {
+    return parseReportRange({ desde: opts.dateFrom, hasta: opts.dateTo });
+  }
+  if (opts.window === '30d') return parseReportRange({ range: '30d' });
+  if (opts.window === '24h') {
+    const now = new Date();
+    const start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const dateTo = todayInGuayaquil(now);
+    const dateFrom = todayInGuayaquil(start);
+    return {
+      preset: 'rango',
+      dateFrom,
+      dateTo,
+      startIso: start.toISOString(),
+      endIso: now.toISOString(),
+      days: dateFrom === dateTo ? 1 : 2,
+    };
+  }
+  return parseReportRange({ range: '7d' });
+}
+
+/** Lleva query de /informe al inbox unificado. */
+export function informeToInboxHref(
+  inboxPath: string,
+  params: { range?: string; desde?: string; hasta?: string }
+): string {
+  const sp = new URLSearchParams();
+  if (isDay(params.desde)) sp.set('desde', params.desde);
+  if (isDay(params.hasta)) sp.set('hasta', params.hasta);
+  if (!params.desde && !params.hasta && params.range === '30d') {
+    sp.set('ventana', '30d');
+  }
+  const qs = sp.toString();
+  return qs ? `${inboxPath}?${qs}` : inboxPath;
+}

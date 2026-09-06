@@ -42,9 +42,9 @@ export function ClientChrome({
               <h1 className="truncate text-lg font-semibold tracking-tight sm:text-xl">{title}</h1>
               <p className="text-xs text-zinc-500">{subtitle}</p>
             </div>
-            <nav className="flex shrink-0 flex-wrap justify-end gap-2">
+            <nav className="flex shrink-0 flex-wrap justify-end gap-2 print:hidden">
               {tab(inboxHref, 'inbox', 'Inbox')}
-              {tab(reportHref, 'informe', 'Informe')}
+              {tab(reportHref, 'informe', 'Imprimir')}
             </nav>
           </div>
         </div>

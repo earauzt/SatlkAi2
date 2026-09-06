@@ -1,13 +1,20 @@
-import { unstable_cache } from 'next/cache';
 import { GUSCHMER_ALIASES, GUSCHMER_KEYWORD_CHIPS, GUSCHMER_NAME, GUSCHMER_TARGET_ID } from './constants';
 import { avatarUrlOf, followersOf, resolveAuthor, stripHtml } from './author-display';
-import { labelTema } from './rules-listening';
+import { KEYWORD_THEMES, labelTema } from './rules-listening';
 import { buildTrollContext, trollSignal } from './troll-heuristics';
 import { getClassification } from './mention-utils';
 import { assignCaso, CASO_IDS, CASO_META, isRetweet, isRulesModel, isYoutubeExact, type CasoId } from './inbox';
 import { canonicalBetter, groupByReprint } from './mention-dedupe';
-import { createAnonClient } from './supabase/anon';
 import type { ListeningQueryOpts, ListeningSort } from './listening-query';
+import {
+  buildListeningReport,
+  loadListeningReportRows,
+  mentionFromReportRow,
+  textHasAlias,
+  type ListeningReport,
+  type ReportRow,
+} from './listening-report';
+import { listeningToReportRange } from './report-range';
 import type { ListeningMention } from './types';
 
 export type SourceMixItem = {
@@ -78,7 +85,9 @@ export type ListeningView = ListeningQueryOpts & {
   engagementSum: number;
   uniqueAuthors: number;
   xMixPct: number;
+  targetInTextPct: number;
   cards: ListeningCard[];
+  report: ListeningReport;
   error: string | null;
 };
 
@@ -89,31 +98,11 @@ const SOURCE_LABELS: Record<string, string> = {
   x: 'X',
 };
 
-const CACHE_SECONDS = 300;
-
-function hoursAgo(hours: number) {
-  return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-}
+const CACHE_SECONDS = 180;
 
 function pct(part: number, total: number) {
   if (total <= 0) return 0;
   return Math.round((part / total) * 1000) / 10;
-}
-
-function asMention(row: Record<string, unknown>): ListeningMention {
-  return {
-    id: String(row.id),
-    text: String(row.text ?? ''),
-    url: (row.url as string | null) ?? null,
-    author_handle: (row.author_handle as string | null) ?? null,
-    author_meta: (row.author_meta as ListeningMention['author_meta']) ?? {},
-    source: String(row.source ?? ''),
-    published_at: String(row.published_at),
-    reach_score: Number(row.reach_score ?? 0),
-    tipo_fuente: String(row.tipo_fuente ?? 'desconocido'),
-    simhash: (row.simhash as number | null) ?? null,
-    classifications: (row.classifications as ListeningMention['classifications']) ?? null,
-  };
 }
 
 function rankScore(card: ListeningCard): number {
@@ -127,20 +116,6 @@ function rankScore(card: ListeningCard): number {
   score += card.combinedReach * 40;
   score += Math.min(card.reprintCount, 50) * 20;
   return score;
-}
-
-function dayBound(day: string, end: boolean): string {
-  return new Date(`${day}T${end ? '23:59:59.999' : '00:00:00.000'}Z`).toISOString();
-}
-
-function resolveRange(opts: ListeningQueryOpts): { start: string; end: string | null } {
-  if (opts.dateFrom || opts.dateTo) {
-    const start = opts.dateFrom ? dayBound(opts.dateFrom, false) : hoursAgo(24 * 90);
-    const end = opts.dateTo ? dayBound(opts.dateTo, true) : new Date().toISOString();
-    return { start, end };
-  }
-  if (opts.window === '24h') return { start: hoursAgo(24), end: null };
-  return { start: hoursAgo(24 * 7), end: null };
 }
 
 function includesInsensitive(haystack: string, needle: string): boolean {
@@ -182,102 +157,32 @@ function sortCards(cards: ListeningCard[], sort: ListeningSort) {
   });
 }
 
-type WindowPayload = {
-  mentions: ListeningMention[];
-  volume: { h24: number; d7: number; total: number };
-  sources: SourceMixItem[];
-  fetchedAt: string;
-  error: string | null;
-};
-
-async function fetchGuschmerWindow(rangeStart: string, rangeEnd: string): Promise<WindowPayload> {
-  const supabase = createAnonClient();
-  const end = rangeEnd || null;
-
-  const countQuery = (since?: string) => {
-    let q = supabase
-      .schema('monitor')
-      .from('mentions')
-      .select('id', { count: 'exact', head: true })
-      .eq('target_id', GUSCHMER_TARGET_ID);
-    if (since) q = q.gt('published_at', since);
-    return q;
-  };
-
-  let mentionQuery = supabase
-    .schema('monitor')
-    .from('mentions')
-    .select(
-      `id, text, url, author_handle, author_meta, source, published_at, reach_score, tipo_fuente, simhash,
-       classifications (sentimiento, etiquetas, resumen, urgencia, confianza, temas, tipo_actor, model)`
-    )
-    .eq('target_id', GUSCHMER_TARGET_ID)
-    .gt('published_at', rangeStart)
-    .order('published_at', { ascending: false })
-    .limit(400);
-  if (end) mentionQuery = mentionQuery.lte('published_at', end);
-
-  const [totalRes, h24Res, d7Res, sourceRes, mentionRes] = await Promise.all([
-    countQuery(),
-    countQuery(hoursAgo(24)),
-    countQuery(hoursAgo(24 * 7)),
-    (() => {
-      let q = supabase
-        .schema('monitor')
-        .from('mentions')
-        .select('source')
-        .eq('target_id', GUSCHMER_TARGET_ID)
-        .gt('published_at', rangeStart);
-      if (end) q = q.lte('published_at', end);
-      return q;
-    })(),
-    mentionQuery,
-  ]);
-
-  const error =
-    mentionRes.error?.message ||
-    totalRes.error?.message ||
-    h24Res.error?.message ||
-    d7Res.error?.message ||
-    sourceRes.error?.message ||
-    null;
-
-  const sourceRows = (sourceRes.data ?? []) as { source: string }[];
+function sourceMixFrom(mentions: ListeningMention[]): SourceMixItem[] {
   const sourceCounts: Record<string, number> = { rss: 0, youtube: 0, x: 0, google_news: 0 };
-  for (const row of sourceRows) {
-    sourceCounts[row.source] = (sourceCounts[row.source] ?? 0) + 1;
+  for (const mention of mentions) {
+    sourceCounts[mention.source] = (sourceCounts[mention.source] ?? 0) + 1;
   }
-  const sources: SourceMixItem[] = ['rss', 'youtube', 'x', 'google_news'].map((key) => ({
+  return ['rss', 'youtube', 'x', 'google_news'].map((key) => ({
     key,
     label: SOURCE_LABELS[key] ?? key,
     count: sourceCounts[key] ?? 0,
   }));
-
-  return {
-    mentions: ((mentionRes.data ?? []) as Record<string, unknown>[]).map(asMention),
-    volume: {
-      total: totalRes.count ?? 0,
-      h24: h24Res.count ?? 0,
-      d7: d7Res.count ?? 0,
-    },
-    sources,
-    fetchedAt: new Date().toISOString(),
-    error,
-  };
 }
 
-const fetchGuschmerWindowCached = unstable_cache(
-  async (rangeStart: string, rangeEnd: string) => fetchGuschmerWindow(rangeStart, rangeEnd),
-  ['guschmer-window-v1'],
-  { revalidate: CACHE_SECONDS }
-);
-
 export async function getGuschmerListening(opts: ListeningQueryOpts): Promise<ListeningView> {
-  const { start, end } = resolveRange(opts);
-  const payload = await fetchGuschmerWindowCached(start, end ?? '');
+  const range = listeningToReportRange(opts);
+  const payload = await loadListeningReportRows({
+    targetId: GUSCHMER_TARGET_ID,
+    range,
+  });
+  const aliases =
+    payload.aliases.length > 0 ? payload.aliases : [...GUSCHMER_ALIASES];
+  const allMentions = payload.rows.map(mentionFromReportRow);
+  const rowById = new Map<string, ReportRow>(payload.rows.map((row) => [row.id, row]));
+  const sources = sourceMixFrom(allMentions);
   const mentions = opts.sourceFilter
-    ? payload.mentions.filter((m) => m.source === opts.sourceFilter)
-    : payload.mentions;
+    ? allMentions.filter((m) => m.source === opts.sourceFilter)
+    : allMentions;
 
   const trollCtx = buildTrollContext(mentions);
   const groups = groupByReprint(mentions);
@@ -303,6 +208,10 @@ export async function getGuschmerListening(opts: ListeningQueryOpts): Promise<Li
   ];
 
   const cards: ListeningCard[] = [];
+  const filteredRows: ReportRow[] = [];
+  const ejeTheme = opts.ejeFilter
+    ? KEYWORD_THEMES.find((theme) => theme.id === opts.ejeFilter)
+    : undefined;
 
   for (const group of groups.values()) {
     const canonical = group.reduce((best, cur) => (canonicalBetter(cur, best) ? cur : best));
@@ -353,6 +262,7 @@ export async function getGuschmerListening(opts: ListeningQueryOpts): Promise<Li
     }
 
     const text = stripHtml(canonical.text);
+    const temas = youtube ? [] : (classification?.temas ?? []).filter((t) => t && t !== 'otro');
     if (opts.sentimentFilter === 'pos' && !(sentiment !== null && sentiment > 0)) continue;
     if (opts.sentimentFilter === 'neg' && !(sentiment !== null && sentiment < 0)) continue;
     if (opts.sentimentFilter === 'neu' && !(sentiment !== null && sentiment === 0)) continue;
@@ -362,6 +272,9 @@ export async function getGuschmerListening(opts: ListeningQueryOpts): Promise<Li
     }
     if (opts.query && !includesInsensitive(text, opts.query)) continue;
     if (opts.keywordFilter && !includesInsensitive(text, opts.keywordFilter)) continue;
+    if (opts.themeFilter && !temas.includes(opts.themeFilter)) continue;
+    if (ejeTheme && !ejeTheme.pattern.test(text)) continue;
+    if (opts.directOnly && !textHasAlias(text, aliases)) continue;
     if (opts.authorFilter) {
       const hay = `${author.label} ${author.handle ?? ''} ${author.displayName ?? ''}`;
       if (!includesInsensitive(hay, opts.authorFilter)) continue;
@@ -372,6 +285,11 @@ export async function getGuschmerListening(opts: ListeningQueryOpts): Promise<Li
       const n = followersOf(m.author_meta) ?? 0;
       return n > max ? n : max;
     }, author.followers ?? 0);
+
+    for (const mention of group) {
+      const row = rowById.get(mention.id);
+      if (row) filteredRows.push(row);
+    }
 
     cards.push({
       mention: { ...canonical, text },
@@ -385,7 +303,7 @@ export async function getGuschmerListening(opts: ListeningQueryOpts): Promise<Li
       sentimentOrigin,
       caso,
       etiquetas: youtube ? [] : classification?.etiquetas ?? [],
-      temas: youtube ? [] : (classification?.temas ?? []).filter((t) => t && t !== 'otro'),
+      temas,
       resumen: youtube ? null : classification?.resumen ?? null,
       urgencia: youtube ? 0 : classification?.urgencia ?? 0,
       model: classification?.model ?? null,
@@ -401,6 +319,17 @@ export async function getGuschmerListening(opts: ListeningQueryOpts): Promise<Li
 
   sortCards(cards, opts.sort);
 
+  const report = buildListeningReport({
+    rows: filteredRows,
+    range,
+    targetId: GUSCHMER_TARGET_ID,
+    targetName: payload.targetName || GUSCHMER_NAME,
+    aliases,
+    truncated: payload.truncated,
+    fetchedAt: new Date().toISOString(),
+    error: payload.error,
+  });
+
   const topTema = [...themeMap.entries()].sort((a, b) => b[1] - a[1])[0];
   const topCaso = [...CASO_IDS].sort((a, b) => casoCounts[b] - casoCounts[a])[0];
   const topTheme = topTema
@@ -411,6 +340,9 @@ export async function getGuschmerListening(opts: ListeningQueryOpts): Promise<Li
 
   const modelLabel =
     [...modelNames.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+
+  const lastDay = report.volume.at(-1)?.count ?? 0;
+  const last7 = report.volume.slice(-7).reduce((sum, p) => sum + p.count, 0);
 
   const sentiment: SentimentSplit = {
     positivo: { count: pos, pct: pct(pos, classified) },
@@ -428,10 +360,10 @@ export async function getGuschmerListening(opts: ListeningQueryOpts): Promise<Li
   return {
     ...opts,
     targetName: GUSCHMER_NAME,
-    fetchedAt: payload.fetchedAt,
+    fetchedAt: report.fetchedAt,
     cacheSeconds: CACHE_SECONDS,
-    volume: payload.volume,
-    sources: payload.sources,
+    volume: { total: report.resultados, h24: lastDay, d7: last7 },
+    sources,
     sentiment,
     topTheme,
     topPositiveAuthors: topAuthorsFrom(positiveAuthors),
@@ -439,15 +371,14 @@ export async function getGuschmerListening(opts: ListeningQueryOpts): Promise<Li
     authors: [...authorCounts.values()].sort((a, b) => b.count - a.count).slice(0, 8),
     keywords: GUSCHMER_KEYWORD_CHIPS,
     casoCounts,
-    rawCount: mentions.length,
-    dedupedCount: groups.size,
-    engagementSum: mentions.reduce((sum, m) => sum + (m.reach_score ?? 0), 0),
-    uniqueAuthors: authorCounts.size,
-    xMixPct: pct(
-      payload.sources.find((s) => s.key === 'x')?.count ?? 0,
-      payload.sources.reduce((sum, s) => sum + s.count, 0)
-    ),
+    rawCount: report.rawCount,
+    dedupedCount: report.resultados,
+    engagementSum: report.engagement,
+    uniqueAuthors: report.uniqueAuthors,
+    xMixPct: report.xMixPct,
+    targetInTextPct: report.targetInTextPct,
     cards,
+    report,
     error: payload.error,
   };
 }

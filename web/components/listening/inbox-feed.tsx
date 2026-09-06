@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import { ListeningMentionCard } from './mention-card';
 import type { ListeningCard } from '@/lib/listening-data';
+import type { CasoId } from '@/lib/inbox';
 import {
   INBOX_STATUS_EVENT,
   INBOX_STATUS_META,
@@ -51,7 +52,19 @@ function writeMap(map: Record<string, InboxStatus>) {
   window.dispatchEvent(new Event(INBOX_STATUS_EVENT));
 }
 
-export function InboxFeed({ cards }: { cards: ListeningCard[] }) {
+export function InboxFeed({
+  cards,
+  temaHref,
+  autorHref,
+  casoHref,
+  sentHref,
+}: {
+  cards: ListeningCard[];
+  temaHref?: (tema: string) => string;
+  autorHref?: (handle: string) => string;
+  casoHref?: (caso: CasoId) => string;
+  sentHref?: (sent: 'neg' | 'neu' | 'pos') => string;
+}) {
   const raw = useSyncExternalStore(subscribe, readStore, () => '{}');
   const map = useMemo(() => parseMap(raw), [raw]);
   const [filter, setFilter] = useState<StatusFilter>('open');
@@ -133,6 +146,10 @@ export function InboxFeed({ cards }: { cards: ListeningCard[] }) {
             card={card}
             status={statusOf(card.mention.id)}
             onStatus={setStatus}
+            temaHref={temaHref}
+            autorHref={autorHref}
+            casoHref={casoHref}
+            sentHref={sentHref}
           />
         ))
       )}
