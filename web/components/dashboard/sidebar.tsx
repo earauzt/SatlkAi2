@@ -8,7 +8,7 @@ import { withTargetQuery } from '@/lib/target-params';
 
 const NAV = [
   { href: '/feed', label: 'Inbox', desc: 'Menciones en vivo' },
-  { href: '/analytics', label: 'Analytics', desc: 'Volumen y fuentes' },
+  { href: '/analytics', label: 'Analytics', desc: 'Informe ejecutivo' },
   { href: '/narratives', label: 'Narrativas', desc: 'Temas activos' },
   { href: '/review', label: 'Revisión', desc: 'Cola manual' },
 ];
@@ -30,7 +30,7 @@ export function Sidebar({
 
   function navHref(href: string) {
     const extra: Record<string, string | undefined> = {};
-    for (const key of ['range', 'days', 'source', 'urgency', 'q']) {
+    for (const key of ['range', 'days', 'source', 'urgency', 'q', 'desde', 'hasta']) {
       const value = searchParams.get(key);
       if (value) extra[key] = value;
     }
