@@ -59,4 +59,4 @@ export type DashboardStats = {
   by_target: Record<string, number>;
 };
 
-export type ListeningWindow = '24h' | '7d' | 'rango';
+export type ListeningWindow = '24h' | '7d' | '30d' | 'rango';

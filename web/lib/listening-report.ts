@@ -109,7 +109,7 @@ export type ListeningReport = {
   error: string | null;
 };
 
-type ReportRow = {
+export type ReportRow = {
   id: string;
   text: string;
   url: string | null;
@@ -200,12 +200,12 @@ function mixSentiment(
   return mix;
 }
 
-function textHasAlias(text: string, aliases: string[]): boolean {
+export function textHasAlias(text: string, aliases: string[]): boolean {
   const hay = stripHtml(text).toLocaleLowerCase('es');
   return aliases.some((alias) => alias && hay.includes(alias.toLocaleLowerCase('es')));
 }
 
-function asMention(row: ReportRow): ListeningMention {
+export function mentionFromReportRow(row: ReportRow): ListeningMention {
   const classification =
     row.sentimiento === null && !row.temas && !row.etiquetas && !row.model
       ? null
@@ -253,7 +253,7 @@ export function buildListeningReport(opts: {
   fetchedAt: string;
   error: string | null;
 }): ListeningReport {
-  const mentions = opts.rows.map(asMention);
+  const mentions = opts.rows.map(mentionFromReportRow);
   const aliasById = new Map<string, string[]>();
   for (const row of opts.rows) {
     const list = [...(row.target_aliases ?? [])];
@@ -782,6 +782,19 @@ const fetchReportRowsCached = unstable_cache(
   ['listening-report-window-v1'],
   { revalidate: CACHE_SECONDS }
 );
+
+export async function loadListeningReportRows(opts: {
+  targetId: string | null;
+  range: ReportRange;
+}): Promise<{
+  rows: ReportRow[];
+  truncated: boolean;
+  error: string | null;
+  targetName: string;
+  aliases: string[];
+}> {
+  return fetchReportRowsCached(opts.targetId ?? '', opts.range.startIso, opts.range.endIso);
+}
 
 export async function getListeningReport(opts: {
   targetId?: string | null;

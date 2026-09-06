@@ -1,8 +1,9 @@
+import Link from 'next/link';
 import { SourceBadge } from '@/components/source-badge';
 import { CategoryChips } from '@/components/category-chips';
 import { HighlightedText } from './highlighted-text';
 import { relTime, sentimentClientLabel } from '@/lib/mention-utils';
-import { CASO_META } from '@/lib/inbox';
+import { CASO_META, type CasoId } from '@/lib/inbox';
 import { labelTema } from '@/lib/rules-listening';
 import type { ListeningCard } from '@/lib/listening-data';
 import type { InboxStatus } from '@/lib/inbox-status';
@@ -45,10 +46,18 @@ export function ListeningMentionCard({
   card,
   status = 'open',
   onStatus,
+  temaHref,
+  autorHref,
+  casoHref,
+  sentHref,
 }: {
   card: ListeningCard;
   status?: InboxStatus;
   onStatus?: (id: string, next: InboxStatus) => void;
+  temaHref?: (tema: string) => string;
+  autorHref?: (handle: string) => string;
+  casoHref?: (caso: CasoId) => string;
+  sentHref?: (sent: 'neg' | 'neu' | 'pos') => string;
 }) {
   const caso = CASO_META[card.caso];
   const sent = card.sentiment !== null ? sentimentClientLabel(card.sentiment) : null;
@@ -81,14 +90,28 @@ export function ListeningMentionCard({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <SourceBadge source={card.mention.source} />
-            <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${caso.className}`}>
-              {caso.label}
-            </span>
-            {sent && (
-              <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${sent.className}`}>
-                {sent.text}
+            {casoHref ? (
+              <Link href={casoHref(card.caso)} className={`rounded-md px-2 py-0.5 text-xs font-medium ${caso.className}`}>
+                {caso.label}
+              </Link>
+            ) : (
+              <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${caso.className}`}>
+                {caso.label}
               </span>
             )}
+            {sent &&
+              (sentHref ? (
+                <Link
+                  href={sentHref(card.sentiment! < 0 ? 'neg' : card.sentiment! > 0 ? 'pos' : 'neu')}
+                  className={`rounded-md px-2 py-0.5 text-xs font-medium ${sent.className}`}
+                >
+                  {sent.text}
+                </Link>
+              ) : (
+                <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${sent.className}`}>
+                  {sent.text}
+                </span>
+              ))}
             <UrgencyCue level={card.urgencia} />
             {card.mention.source === 'youtube' && (
               <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600">
@@ -114,7 +137,13 @@ export function ListeningMentionCard({
           </div>
 
           <p className="mt-1.5 text-sm font-medium leading-snug text-zinc-900">
-            {displayName}
+            {autorHref && card.authorHandle ? (
+              <Link href={autorHref(card.authorHandle)} className="underline-offset-2 hover:underline">
+                {displayName}
+              </Link>
+            ) : (
+              displayName
+            )}
             {showHandle && (
               <span className="ml-1 font-normal text-zinc-500">{card.authorHandle}</span>
             )}
@@ -130,14 +159,19 @@ export function ListeningMentionCard({
 
           <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2">
             <CategoryChips tags={card.etiquetas} />
-            {card.temas.map((tema) => (
-              <span
-                key={tema}
-                className="rounded-full bg-zinc-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-600 ring-1 ring-inset ring-zinc-200"
-              >
-                {labelTema(tema)}
-              </span>
-            ))}
+            {card.temas.map((tema) => {
+              const className =
+                'rounded-full bg-zinc-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-600 ring-1 ring-inset ring-zinc-200 hover:bg-zinc-100';
+              return temaHref ? (
+                <Link key={tema} href={temaHref(tema)} className={className}>
+                  {labelTema(tema)}
+                </Link>
+              ) : (
+                <span key={tema} className={className}>
+                  {labelTema(tema)}
+                </span>
+              );
+            })}
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-zinc-500">

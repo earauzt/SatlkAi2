@@ -3,6 +3,8 @@
 import { useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import { ListeningMentionCard } from './mention-card';
 import type { ListeningCard } from '@/lib/listening-data';
+import type { CasoId } from '@/lib/inbox';
+import { buildListeningHref, type ListeningHrefState } from '@/lib/listening-query';
 import {
   INBOX_STATUS_EVENT,
   INBOX_STATUS_META,
@@ -51,7 +53,30 @@ function writeMap(map: Record<string, InboxStatus>) {
   window.dispatchEvent(new Event(INBOX_STATUS_EVENT));
 }
 
-export function InboxFeed({ cards }: { cards: ListeningCard[] }) {
+export function InboxFeed({
+  cards,
+  basePath,
+  hrefState,
+}: {
+  cards: ListeningCard[];
+  basePath?: string;
+  hrefState?: ListeningHrefState;
+}) {
+  const href = (patch: Parameters<typeof buildListeningHref>[2]) =>
+    hrefState && basePath ? buildListeningHref(basePath, hrefState, patch) : '';
+  const temaHref = hrefState
+    ? (tema: string) => href({ tema: hrefState.themeFilter === tema ? '' : tema })
+    : undefined;
+  const autorHref = hrefState
+    ? (handle: string) => href({ autor: hrefState.authorFilter === handle ? '' : handle })
+    : undefined;
+  const casoHref = hrefState
+    ? (caso: CasoId) => href({ caso: hrefState.casoFilter === caso ? '' : caso })
+    : undefined;
+  const sentHref = hrefState
+    ? (sent: 'neg' | 'neu' | 'pos') =>
+        href({ sentimiento: hrefState.sentimentFilter === sent ? '' : sent })
+    : undefined;
   const raw = useSyncExternalStore(subscribe, readStore, () => '{}');
   const map = useMemo(() => parseMap(raw), [raw]);
   const [filter, setFilter] = useState<StatusFilter>('open');
@@ -133,6 +158,10 @@ export function InboxFeed({ cards }: { cards: ListeningCard[] }) {
             card={card}
             status={statusOf(card.mention.id)}
             onStatus={setStatus}
+            temaHref={temaHref}
+            autorHref={autorHref}
+            casoHref={casoHref}
+            sentHref={sentHref}
           />
         ))
       )}

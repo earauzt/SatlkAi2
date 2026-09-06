@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'Inbox — Andrés Guschmer',
-  description: 'Inbox de menciones de Andrés Guschmer en prensa, YouTube y X',
+  description: 'Inbox de escucha: menciones urgentes, KPIs y análisis en una sola página',
 };
 
 export default function HomePage({

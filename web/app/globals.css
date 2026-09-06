@@ -37,3 +37,13 @@
     scrollbar-color: #d4d4d8 transparent;
   }
 }
+
+@media print {
+  header {
+    position: static !important;
+  }
+
+  body {
+    background: white;
+  }
+}
