@@ -240,7 +240,7 @@ export function ListeningDashboard({
             Lectura del periodo
           </p>
           <p className="mt-2 text-sm leading-relaxed text-zinc-800">{report.hallazgo}</p>
-          <ol className="mt-3 space-y-2">
+          <ol className="mt-3 hidden space-y-2 xl:block">
             {report.narrative.slice(0, 5).map((item, i) => (
               <li key={item.id} className="flex min-w-0 gap-2">
                 <span className="w-5 shrink-0 text-xs font-semibold text-amber-600">
@@ -253,6 +253,24 @@ export function ListeningDashboard({
               </li>
             ))}
           </ol>
+          <details className="mt-2 xl:hidden">
+            <summary className="min-h-11 cursor-pointer list-none text-sm font-medium text-zinc-800 [&::-webkit-details-marker]:hidden">
+              {report.narrative.length} lecturas · se actualizan con los filtros
+            </summary>
+            <ol className="mt-3 space-y-2">
+              {report.narrative.slice(0, 5).map((item, i) => (
+                <li key={item.id} className="flex min-w-0 gap-2">
+                  <span className="w-5 shrink-0 text-xs font-semibold text-amber-600">
+                    {String(i + 1).padStart(2, '0')}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-zinc-900">{item.title}</p>
+                    <p className="text-sm leading-relaxed text-zinc-600">{item.body}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </details>
           <p className="mt-3 text-[11px] text-zinc-400">
             Se recalcula con los mismos filtros que el feed. No se copian cifras de informes externos.
           </p>
