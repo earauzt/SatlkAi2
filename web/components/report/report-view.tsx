@@ -217,7 +217,6 @@ export function ReportView({
 }) {
   const href = (patch: Record<string, string | undefined>) =>
     withReportQuery(basePath, { ...extraQuery, ...patch });
-  const custom = report.range.preset === 'rango';
 
   return (
     <div className="min-w-0 space-y-4">
@@ -263,7 +262,8 @@ export function ReportView({
           <input
             type="date"
             name="desde"
-            defaultValue={custom ? report.range.dateFrom : ''}
+            defaultValue={report.range.dateFrom}
+            lang="es-EC"
             className="mt-1 block min-h-11 w-full min-w-[10rem] rounded-xl border border-zinc-200 bg-white px-3 text-sm outline-none ring-zinc-900 focus:ring-2"
           />
         </label>
@@ -272,7 +272,8 @@ export function ReportView({
           <input
             type="date"
             name="hasta"
-            defaultValue={custom ? report.range.dateTo : ''}
+            defaultValue={report.range.dateTo}
+            lang="es-EC"
             className="mt-1 block min-h-11 w-full min-w-[10rem] rounded-xl border border-zinc-200 bg-white px-3 text-sm outline-none ring-zinc-900 focus:ring-2"
           />
         </label>
